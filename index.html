@@ -626,8 +626,11 @@ async function loadData() {
       payMap[p.staff_id][p.month_idx]  = p.amount;
       if (p.note) noteMap[p.staff_id][p.month_idx] = p.note;
       if (p.amount > 0 && p.updated_at) {
-        if (!dateMap[p.staff_id] || p.updated_at > dateMap[p.staff_id])
-          dateMap[p.staff_id] = p.updated_at;
+        if (!dateMap[p.staff_id] || p.updated_at > dateMap[p.staff_id].date) {
+          dateMap[p.staff_id] = { date: p.updated_at, amount: p.amount };
+        } else if (p.updated_at.slice(0,10) === dateMap[p.staff_id].date.slice(0,10)) {
+          dateMap[p.staff_id].amount += p.amount;
+        }
       }
     });
 
