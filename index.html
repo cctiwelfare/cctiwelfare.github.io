@@ -778,7 +778,8 @@ function computeStats() {
     if (behind === 0 && paidAhead > 0)   { statusCls = 'dm-ahead';  statusLabel = `Ahead +${paidAhead}`; }
     else if (behind === 0 && hasPartial)  { statusCls = 'dm-ok';     statusLabel = 'Up to date'; }
     else if (behind === 0)                { statusCls = 'dm-ok';     statusLabel = 'Up to date'; }
-    else if (hasPartial)                  { statusCls = 'dm-partial';statusLabel = `${behind} month${behind>1?"s":""} behind${showInclPartial?" (incl. partial)":hasPartial&&behind===1?" (partial)":""}`; }
+    else if (hasPartial && !hasFullUnpaid) { statusCls = 'dm-partial';statusLabel = `${behind} month${behind>1?"s":""} behind (partial)`; }
+    else if (hasPartial && hasFullUnpaid)  { statusCls = 'dm-partial';statusLabel = `${behind} month${behind>1?"s":""} behind${behind>1?" (incl. partial)":""}`; }
     else if (behind <= 2)                 { statusCls = 'dm-warn';   statusLabel = `${behind} month${behind>1?"s":""} behind`; }
     else                                  { statusCls = 'dm-behind'; statusLabel = `${behind} month${behind>1?"s":""} behind`; }
     if (!deptMembers[dept]) deptMembers[dept] = [];
