@@ -460,6 +460,18 @@ footer { color: #1e3d6b; font-size: 11px; text-align: center; padding: 16px; mar
       <div id="addMonthMsg" style="margin-top:8px;font-size:12px;text-align:center;display:none"></div>
     </div>
 
+    <!-- Daily Payments Report -->
+    <div class="section-head">Download Daily Payments Report</div>
+    <div style="background:#162d55;border-radius:12px;padding:16px;margin-bottom:16px">
+      <div style="color:#a0bedd;font-size:12px;margin-bottom:12px">Download a summary of all payments recorded on a specific date.</div>
+      <div style="margin-bottom:14px">
+        <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">Date</label>
+        <input type="date" id="reportDate" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:13px;outline:none;box-sizing:border-box">
+      </div>
+      <button onclick="downloadDailyReport()" style="width:100%;padding:12px;background:#2e75b6;border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:700;cursor:pointer">&#11015; Download Report</button>
+      <div id="reportMsg" style="margin-top:8px;font-size:12px;text-align:center;display:none"></div>
+    </div>
+
     <!-- Glico Payments -->
     <div class="section-head">Record Glico Payment</div>
     <div style="background:#162d55;border-radius:12px;padding:16px;margin-bottom:16px">
@@ -605,10 +617,18 @@ async function loadData() {
     const { data: paymentRows } = await db.from('payments').select('*').eq('period_id', PERIOD_ID);
 
     // Build payment map: staff_id -> { month_idx -> amount }
-    const payMap = {};
+    const payMap  = {};
+    const noteMap = {};
+    const dateMap = {};
     paymentRows.forEach(p => {
-      if (!payMap[p.staff_id]) payMap[p.staff_id] = {};
-      payMap[p.staff_id][p.month_idx] = p.amount;
+      if (!payMap[p.staff_id])  payMap[p.staff_id]  = {};
+      if (!noteMap[p.staff_id]) noteMap[p.staff_id] = {};
+      payMap[p.staff_id][p.month_idx]  = p.amount;
+      if (p.note) noteMap[p.staff_id][p.month_idx] = p.note;
+      if (p.amount > 0 && p.updated_at) {
+        if (!dateMap[p.staff_id] || p.updated_at > dateMap[p.staff_id])
+          dateMap[p.staff_id] = p.updated_at;
+      }
     });
 
     // Build STAFF array: [no, name, dept, payments[]]
@@ -618,7 +638,7 @@ async function loadData() {
         if (i < s.joined_month) return null; // pre-membership
         return payMap[s.id] && payMap[s.id][i] !== undefined ? payMap[s.id][i] : null;
       });
-      return [String(i + 1), s.name, s.department, payments, s.id]; // serial no, include db id
+      return [String(i + 1), s.name, s.department, payments, s.id, dateMap[s.id] || null];
     });
 
     // Sort staffRows by staff_no to match Excel order
@@ -1064,6 +1084,12 @@ function showCard([num, name, dept, payments], staffIdx) {
         <span class="total-amount" id="cardTotal">¢${total.toLocaleString()}</span>
       </div>
 ${buildStatusBar(payments, joinIdx)}
+      ${(() => {
+        const info = STAFF[staffIdx][5];
+        if (!info) return '';
+        const lastDate = new Date(info.date).toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'numeric'});
+        return '<div style="font-size:11px;color:#6a8ab5;text-align:center;padding:4px 0">Last payment: GH&#x20B5;' + info.amount.toLocaleString() + ' on ' + lastDate + '</div>';
+      })()}
       <div class="save-bar" id="saveBar">
         <input type="text" class="note-input" id="paymentNote" placeholder="Add a note e.g. cash received 15/07/26 (optional)">
         <button class="save-btn" onclick="saveChanges()">Save Payment</button>
@@ -1339,8 +1365,11 @@ async function setupAdminPanel() {
   if (countEl) countEl.textContent = MONTHS.length + ' months (' + MONTHS[0] + ' to ' + MONTHS[MONTHS.length-1] + ')';
 
   // Set default date to today
+  const today = new Date().toISOString().slice(0,10);
   const dateEl = document.getElementById('glicoDate');
-  if (dateEl) dateEl.value = new Date().toISOString().slice(0,10);
+  if (dateEl) dateEl.value = today;
+  const reportDateEl = document.getElementById('reportDate');
+  if (reportDateEl) reportDateEl.value = today;
 
   // Load existing Glico payments
   const { data: glicoList } = await db.from('glico_payments').select('*').eq('period_id', PERIOD_ID).order('paid_date');
@@ -1414,8 +1443,11 @@ async function addMonth() {
   if (countEl) countEl.textContent = MONTHS.length + ' months (' + MONTHS[0] + ' to ' + MONTHS[MONTHS.length-1] + ')';
 
   // Set default date to today
+  const today = new Date().toISOString().slice(0,10);
   const dateEl = document.getElementById('glicoDate');
-  if (dateEl) dateEl.value = new Date().toISOString().slice(0,10);
+  if (dateEl) dateEl.value = today;
+  const reportDateEl = document.getElementById('reportDate');
+  if (reportDateEl) reportDateEl.value = today;
 
   // Load existing Glico payments
   const { data: glicoList } = await db.from('glico_payments').select('*').eq('period_id', PERIOD_ID).order('paid_date');
@@ -1460,6 +1492,84 @@ async function deactivateStaff() {
 
 function showAdminMsg(el, text, color) {
   el.textContent = text; el.style.color = color; el.style.display = 'block';
+}
+
+// ── Daily Payments Report ────────────────────────────────────
+async function downloadDailyReport() {
+  const date    = document.getElementById('reportDate').value;
+  const msg     = document.getElementById('reportMsg');
+  if (!date) { showAdminMsg(msg, 'Please select a date.', '#ff8080'); return; }
+
+  showAdminMsg(msg, 'Generating...', '#a0bedd');
+
+  // Fetch payments updated on this date
+  const dateStart = date + 'T00:00:00.000Z';
+  const dateEnd   = date + 'T23:59:59.999Z';
+  const { data: payments, error } = await db.from('payments')
+    .select('*, staff(name, department)')
+    .eq('period_id', PERIOD_ID)
+    .gte('updated_at', dateStart)
+    .lte('updated_at', dateEnd)
+    .gt('amount', 0)
+    .order('updated_at');
+
+  if (error) { showAdminMsg(msg, 'Error: ' + error.message, '#ff8080'); return; }
+  if (!payments || payments.length === 0) {
+    showAdminMsg(msg, 'No payments found for ' + date, '#ff8080'); return;
+  }
+
+  // Format date as DD/MM/YYYY
+  const [y, m, d] = date.split('-');
+  const dateLabel = d + '/' + m + '/' + y;
+  const dateTitle = new Date(date).toLocaleDateString('en-GB', {day:'2-digit', month:'long', year:'numeric'});
+
+  // Calculate running balance
+  const { data: glicoData } = await db.from('glico_payments').select('amount').eq('period_id', PERIOD_ID);
+  const totalGlico = (glicoData || []).reduce((s,g) => s + g.amount, 0);
+
+  // Get previous total (all payments before this date)
+  const { data: prevPayments } = await db.from('payments')
+    .select('amount')
+    .eq('period_id', PERIOD_ID)
+    .lt('updated_at', dateStart)
+    .gt('amount', 0);
+  const prevTotal = (prevPayments || []).reduce((s,p) => s + p.amount, 0);
+  const newTotal  = prevTotal + payments.reduce((s,p) => s + p.amount, 0);
+
+  // Build txt content matching your format
+  let lines = [];
+  lines.push('CCTI Staff Welfare Association');
+  lines.push('Glico/Welfare Contributions');
+  lines.push('Payments Update ' + dateLabel);
+  lines.push('');
+  lines.push('Balance b/f - GH₵' + prevTotal.toLocaleString('en-GH', {minimumFractionDigits:2}) + '');
+  lines.push('');
+  lines.push('New Payments:');
+  lines.push('');
+
+  let dayTotal = 0;
+  payments.forEach(p => {
+    const name = p.staff ? p.staff.name : 'Unknown';
+    const dept = p.staff ? p.staff.department : '';
+    const note = p.note ? ' (' + p.note + ')' : '';
+    lines.push(name + ' (' + dept + ') - ' + p.amount + note + ' (' + dateLabel + ')');
+    dayTotal += p.amount;
+  });
+
+  lines.push('');
+  lines.push('Total - GH₵' + dayTotal.toLocaleString('en-GH', {minimumFractionDigits:2}));
+  lines.push('');
+  lines.push('This will change the overall total from GH₵' + prevTotal.toLocaleString('en-GH', {minimumFractionDigits:2}) + ' to GH₵' + newTotal.toLocaleString('en-GH', {minimumFractionDigits:2}));
+  lines.push('');
+  lines.push('Balance c/d - GH₵' + newTotal.toLocaleString('en-GH', {minimumFractionDigits:2}));
+
+  const blob = new Blob([lines.join('\n')], {type: 'text/plain;charset=utf-8'});
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
+  a.download = 'Glico_Payments_Update_' + d + '_' + m + '_' + y + '.txt';
+  a.click();
+
+  showAdminMsg(msg, payments.length + ' payments exported.', '#5fdb80');
 }
 
 // Start
