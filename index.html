@@ -620,12 +620,15 @@ async function loadData() {
     const payMap  = {};
     const noteMap = {};
     const dateMap = {};
+    // Import cutoff: hardcoded to exact import timestamp
+    // Any payment updated AFTER this was entered through the app
+    const importCutoff = '2026-07-16T16:11:07.972538+00:00';
     paymentRows.forEach(p => {
       if (!payMap[p.staff_id])  payMap[p.staff_id]  = {};
       if (!noteMap[p.staff_id]) noteMap[p.staff_id] = {};
       payMap[p.staff_id][p.month_idx]  = p.amount;
       if (p.note) noteMap[p.staff_id][p.month_idx] = p.note;
-      if (p.amount > 0 && p.updated_at) {
+      if (p.amount > 0 && p.updated_at && p.updated_at > importCutoff) {
         if (!dateMap[p.staff_id] || p.updated_at > dateMap[p.staff_id].date) {
           dateMap[p.staff_id] = { date: p.updated_at, amount: p.amount };
         } else if (p.updated_at.slice(0,10) === dateMap[p.staff_id].date.slice(0,10)) {
