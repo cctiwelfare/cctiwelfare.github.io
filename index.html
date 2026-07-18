@@ -595,6 +595,10 @@ footer { color: #1e3d6b; font-size: 11px; text-align: center; padding: 16px; mar
         <input type="text" id="editStaffName" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:14px;outline:none;box-sizing:border-box">
       </div>
       <div style="margin-bottom:10px">
+        <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">Phone Number</label>
+        <input type="tel" id="editStaffPhone" placeholder="e.g. 0244123456" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:14px;outline:none;box-sizing:border-box">
+      </div>
+      <div style="margin-bottom:10px">
         <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">Department</label>
         <input type="text" id="editStaffDept" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:14px;outline:none;box-sizing:border-box">
       </div>
@@ -1482,6 +1486,10 @@ async function saveChanges() {
       saveBtn.disabled = false;
     }, 2000);
 
+    // Send SMS notification
+    const totalReceived = edits.reduce((s,e) => s+e.received, 0);
+    sendPaymentSMS(staffIdx, totalReceived, dateRcvd);
+
     // Recalculate totals
     MONTHLY_TOTALS = new Array(MONTHS.length).fill(0);
     STAFF.forEach(([,,,p]) => p.forEach((v,i) => { if (v) MONTHLY_TOTALS[i] += v; }));
@@ -2018,6 +2026,7 @@ async function loadLedger() {
     .neq('action', 'import')
     .neq('action', 'void')
     .eq('is_voided', false)
+    .gt('amount_change', 0)
     .order('created_at', { ascending: false })
     .limit(200);
 
@@ -2202,6 +2211,72 @@ async function loadAuditLog() {
   resultsEl.innerHTML = html;
 }
 
+// ── SMS Notifications ────────────────────────────────────────
+const MOOLRE_API_KEY  = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ2YXNpZCI6MTA5MDQsImV4cCI6MTk1NjUyNzk5OX0.e728FypY88eoCEjmgt5HagQw7mv-5JIh9YqUiD5pj74';
+const MOOLRE_SENDER   = 'CCTIWelfare';
+
+async function sendPaymentSMS(staffIdx, amountReceived, dateRcvd) {
+  // Fetch phone number for this staff
+  const staffId = STAFF[staffIdx][4];
+  const staffRow = (window._allStaffRows || []).find(s => s.id === staffId);
+  const phone = staffRow ? staffRow.phone : null;
+  if (!phone) return; // no phone number stored
+
+  const name     = STAFF[staffIdx][1].split(' ')[0]; // first name only
+  const payments = STAFF[staffIdx][3];
+  const joinIdx  = payments.findIndex(v => v !== null);
+  const total    = payments.reduce((s, v) => s + (v || 0), 0);
+
+  // Calculate status
+  const behindTotal = payments.slice(joinIdx, DUE_MONTHS)
+    .reduce((s, v) => v === null || v < 40 ? s + (40 - (v || 0)) : s, 0);
+  const behind = payments.slice(joinIdx, DUE_MONTHS).filter(v => v === null || v < 40).length;
+  const paidAhead = payments.slice(DUE_MONTHS).filter(v => v !== null && v > 0).length;
+  const aheadTotal = payments.slice(DUE_MONTHS).reduce((s, v) => s + (v || 0), 0);
+  const currentMonth = MONTHS[CURRENT_IDX].replace(/\'(\d{2})$/, (_, y) => ' 20' + y);
+
+  // Format date received
+  const dateStr = dateRcvd
+    ? new Date(dateRcvd + 'T00:00:00').toLocaleDateString('en-GB', {day:'2-digit', month:'short', year:'numeric'})
+    : new Date().toLocaleDateString('en-GB', {day:'2-digit', month:'short', year:'numeric'});
+
+  // Build message based on status
+  let statusLine = '';
+  if (behindTotal === 0 && paidAhead > 0) {
+    statusLine = 'Paid up to ' + currentMonth + '. ' + paidAhead + ' month' + (paidAhead>1?'s':'') + ' advance: GHS' + aheadTotal + '.';
+  } else if (behindTotal === 0) {
+    statusLine = 'Paid up to ' + currentMonth + '.';
+  } else if (amountReceived > 0 && behind > 0) {
+    statusLine = 'Arrears reduced. You owe ' + behind + ' month' + (behind>1?'s':'') + ' up to ' + currentMonth + ': GHS' + behindTotal + '.';
+  } else {
+    statusLine = 'You owe ' + behind + ' month' + (behind>1?'s':'') + ' up to ' + currentMonth + ': GHS' + behindTotal + '.';
+  }
+
+  const message = 'Dear ' + name + ', GHS' + amountReceived + ' received ' + dateStr + '. ' + statusLine + ' Total paid: GHS' + total + '. -CCTI Staff Welfare';
+
+  // Format phone number to international format
+  let phoneNum = phone.replace(/\s/g, '');
+  if (phoneNum.startsWith('0')) phoneNum = '233' + phoneNum.slice(1);
+  if (!phoneNum.startsWith('233')) phoneNum = '233' + phoneNum;
+
+  try {
+    await fetch('https://api.moolre.com/open/sms/send', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-VASKEY': MOOLRE_API_KEY
+      },
+      body: JSON.stringify({
+        type: 1,
+        senderid: MOOLRE_SENDER,
+        messages: [{ recipient: phoneNum, message }]
+      })
+    });
+  } catch(e) {
+    console.error('SMS failed:', e);
+  }
+}
+
 // ── Arrears Export ───────────────────────────────────────────
 function exportArrears() {
   const msg = document.getElementById('arrearsMsg');
@@ -2290,14 +2365,18 @@ function loadStaffForEdit() {
   const s = STAFF.find(s => s[4] === id);
   const r = (window._allStaffRows || []).find(s => s.id === id);
   if (s) {
-    document.getElementById('editStaffName').value = s[1];
-    document.getElementById('editStaffDept').value = s[2];
+    document.getElementById('editStaffName').value  = s[1];
+    document.getElementById('editStaffDept').value  = s[2];
+    // phone not in STAFF array - fetch from allStaffRows
+    const sr = (window._allStaffRows || []).find(r => r.id === s[4]);
+    document.getElementById('editStaffPhone').value = sr ? (sr.phone || '') : '';
     const joinedSel = document.getElementById('editStaffJoined');
     const joinIdx   = s[3].findIndex(v => v !== null);
     if (joinedSel) joinedSel.value = joinIdx > 0 ? joinIdx : 0;
   } else if (r) {
-    document.getElementById('editStaffName').value = r.name;
-    document.getElementById('editStaffDept').value = r.department;
+    document.getElementById('editStaffName').value  = r.name;
+    document.getElementById('editStaffDept').value  = r.department;
+    document.getElementById('editStaffPhone').value = r.phone || '';
     const joinedSel = document.getElementById('editStaffJoined');
     if (joinedSel) joinedSel.value = r.joined_month || 0;
   }
@@ -2309,13 +2388,14 @@ async function saveStaffEdit() {
   const name   = document.getElementById('editStaffName').value.trim();
   const dept   = document.getElementById('editStaffDept').value.trim();
   const joined = parseInt(document.getElementById('editStaffJoined').value);
+  const phone  = document.getElementById('editStaffPhone').value.trim() || null;
   const msg    = document.getElementById('editStaffMsg');
 
   if (!name || !dept) { showAdminMsg(msg, 'Name and department are required.', '#ff8080'); return; }
 
   showAdminMsg(msg, 'Saving...', '#a0bedd');
   const { error } = await db.from('staff')
-    .update({ name, department: dept, joined_month: joined })
+    .update({ name, department: dept, joined_month: joined, phone })
     .eq('id', id);
 
   if (error) { showAdminMsg(msg, 'Error: ' + error.message, '#ff8080'); return; }
