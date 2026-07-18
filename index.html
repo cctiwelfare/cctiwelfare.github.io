@@ -680,7 +680,9 @@ async function loadData() {
     document.getElementById('periodLabel').textContent = formatMonth(period.months[0]) + ' – ' + formatMonth(period.months[CURRENT_IDX]);
 
     // Fetch active staff
-    const { data: staffRows } = await db.from('staff').select('*').eq('is_active', true).order('sort_order');
+    const { data: staffRows }    = await db.from('staff').select('*').eq('is_active', true).order('sort_order');
+    const { data: fullStaffRows } = await db.from('staff').select('*').order('sort_order');
+    window._allStaffRows = fullStaffRows || [];
 
     // Fetch all payments for this period
     const { data: paymentRows } = await db.from('payments').select('*').eq('period_id', PERIOD_ID);
@@ -1615,18 +1617,21 @@ async function setupAdminPanel() {
   if (auditFrom) auditFrom.value = today;
   if (auditTo)   auditTo.value   = today;
 
+  // Populate edit joined month dropdown first
+  const editJoinedSel = document.getElementById('editStaffJoined');
+  if (editJoinedSel) editJoinedSel.innerHTML = MONTHS.map((m,i) => '<option value="'+i+'">'+m+'</option>').join('');
+
   // Populate edit staff dropdown
   const editSel = document.getElementById('editStaffSelect');
   if (editSel) {
-    editSel.innerHTML = STAFF.map(s =>
-      '<option value="'+s[4]+'">'+s[1]+' ('+s[2]+')</option>'
+    const allStaff = window._allStaffRows || STAFF;
+    editSel.innerHTML = allStaff.map(s =>
+      Array.isArray(s)
+        ? '<option value="'+s[4]+'">'+s[1]+' ('+s[2]+')</option>'
+        : '<option value="'+s.id+'">'+s.name+' ('+s.department+')</option>'
     ).join('');
     loadStaffForEdit(); // prefill with first staff
   }
-
-  // Populate edit joined month dropdown
-  const editJoinedSel = document.getElementById('editStaffJoined');
-  if (editJoinedSel) editJoinedSel.innerHTML = MONTHS.map((m,i) => '<option value="'+i+'">'+m+'</option>').join('');
 
   const countEl = document.getElementById('currentMonthCount');
   if (countEl) countEl.textContent = MONTHS.length + ' months (' + MONTHS[0] + ' to ' + MONTHS[MONTHS.length-1] + ')';
@@ -1936,16 +1941,23 @@ async function loadAuditLog() {
 
 // ── Edit Staff ───────────────────────────────────────────────
 function loadStaffForEdit() {
-  const sel  = document.getElementById('editStaffSelect');
-  const id   = parseInt(sel.value);
-  const s    = STAFF.find(s => s[4] === id);
-  if (!s) return;
-  document.getElementById('editStaffName').value  = s[1];
-  document.getElementById('editStaffDept').value  = s[2];
-  // Set joining month
-  const joinedSel = document.getElementById('editStaffJoined');
-  const joinIdx   = s[3].findIndex(v => v !== null);
-  if (joinedSel) joinedSel.value = joinIdx > 0 ? joinIdx : 0;
+  const sel = document.getElementById('editStaffSelect');
+  const id  = parseInt(sel.value);
+  // Try STAFF array first, then allStaffRows
+  const s = STAFF.find(s => s[4] === id);
+  const r = (window._allStaffRows || []).find(s => s.id === id);
+  if (s) {
+    document.getElementById('editStaffName').value = s[1];
+    document.getElementById('editStaffDept').value = s[2];
+    const joinedSel = document.getElementById('editStaffJoined');
+    const joinIdx   = s[3].findIndex(v => v !== null);
+    if (joinedSel) joinedSel.value = joinIdx > 0 ? joinIdx : 0;
+  } else if (r) {
+    document.getElementById('editStaffName').value = r.name;
+    document.getElementById('editStaffDept').value = r.department;
+    const joinedSel = document.getElementById('editStaffJoined');
+    if (joinedSel) joinedSel.value = r.joined_month || 0;
+  }
 }
 
 async function saveStaffEdit() {
