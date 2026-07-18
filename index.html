@@ -516,6 +516,29 @@ footer { color: #1e3d6b; font-size: 11px; text-align: center; padding: 16px; mar
       <div id="deactivateMsg" style="margin-top:8px;font-size:12px;text-align:center;display:none"></div>
     </div>
 
+    <!-- Payment Audit Log -->
+    <div class="section-head">Payment Audit Log</div>
+    <div style="background:#162d55;border-radius:12px;padding:16px;margin-bottom:16px">
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <div style="flex:1">
+          <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">From</label>
+          <input type="date" id="auditDateFrom" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:12px;outline:none;box-sizing:border-box">
+        </div>
+        <div style="flex:1">
+          <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">To</label>
+          <input type="date" id="auditDateTo" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:12px;outline:none;box-sizing:border-box">
+        </div>
+      </div>
+      <div style="margin-bottom:10px">
+        <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">Staff (optional)</label>
+        <select id="auditStaffFilter" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:12px;outline:none">
+          <option value="">All Staff</option>
+        </select>
+      </div>
+      <button onclick="loadAuditLog()" style="width:100%;padding:11px;background:#1a4b8c;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:12px">Load Audit Log</button>
+      <div id="auditLogResults" style="font-size:12px;max-height:400px;overflow-y:auto"></div>
+    </div>
+
     <!-- Edit Staff Details -->
     <div class="section-head">Edit Staff Details</div>
     <div style="background:#162d55;border-radius:12px;padding:16px;margin-bottom:16px">
@@ -765,6 +788,20 @@ async function savePaymentToDb(staffDbId, staffName, monthIdx, amount, note, dat
     };
     const { error } = await db.from('payments').upsert(payload, { onConflict: 'staff_id,period_id,month_idx' });
     if (error) throw error;
+
+    // Record in payment_history
+    const historyPayload = {
+      staff_id:      staffDbId,
+      period_id:     PERIOD_ID,
+      month_idx:     monthIdx,
+      action:        (amountReceived && amountReceived < amount) ? 'topup' : 'new',
+      amount_change: amountReceived || amount || 0,
+      total_after:   amount || 0,
+      received_date: dateReceived || null,
+      note:          note || null,
+      entered_by:    user ? user.email : null,
+    };
+    await db.from('payment_history').insert(historyPayload);
 
     saveBtn.textContent = 'Saved!';
     saveBtn.style.background = '#155724';
@@ -1567,6 +1604,17 @@ async function setupAdminPanel() {
     '<option value="'+s[4]+'">'+s[1]+' ('+s[2]+')</option>'
   ).join('');
 
+  // Populate audit log filters
+  const auditStaffSel = document.getElementById('auditStaffFilter');
+  if (auditStaffSel) {
+    auditStaffSel.innerHTML = '<option value="">All Staff</option>'
+      + STAFF.map(s => '<option value="'+s[4]+'">'+s[1]+'</option>').join('');
+  }
+  const auditFrom = document.getElementById('auditDateFrom');
+  const auditTo   = document.getElementById('auditDateTo');
+  if (auditFrom) auditFrom.value = today;
+  if (auditTo)   auditTo.value   = today;
+
   // Populate edit staff dropdown
   const editSel = document.getElementById('editStaffSelect');
   if (editSel) {
@@ -1827,6 +1875,63 @@ async function downloadDailyReport() {
   a.click();
 
   showAdminMsg(msg, payments.length + ' payments exported.', '#5fdb80');
+}
+
+// ── Payment Audit Log ────────────────────────────────────────
+async function loadAuditLog() {
+  const dateFrom  = document.getElementById('auditDateFrom').value;
+  const dateTo    = document.getElementById('auditDateTo').value;
+  const staffId   = document.getElementById('auditStaffFilter').value;
+  const resultsEl = document.getElementById('auditLogResults');
+
+  resultsEl.innerHTML = '<div style="color:#a0bedd;text-align:center;padding:12px">Loading...</div>';
+
+  let query = db.from('payment_history')
+    .select('*, staff(name, department)')
+    .eq('period_id', PERIOD_ID)
+    .neq('action', 'import')
+    .order('created_at', { ascending: false })
+    .limit(100);
+
+  if (dateFrom) query = query.gte('created_at', dateFrom + 'T00:00:00Z');
+  if (dateTo)   query = query.lte('created_at', dateTo   + 'T23:59:59Z');
+  if (staffId)  query = query.eq('staff_id', staffId);
+
+  const { data, error } = await query;
+
+  if (error) { resultsEl.innerHTML = '<div style="color:#ff8080">Error: ' + error.message + '</div>'; return; }
+  if (!data || data.length === 0) { resultsEl.innerHTML = '<div style="color:#a0bedd;text-align:center;padding:12px">No records found.</div>'; return; }
+
+  let html = '<table style="width:100%;border-collapse:collapse">';
+  html += '<tr style="color:#5b9bd5;font-size:10px;text-transform:uppercase;letter-spacing:.5px">'
+    + '<th style="text-align:left;padding:6px 4px;border-bottom:1px solid #1e3d6b">Date</th>'
+    + '<th style="text-align:left;padding:6px 4px;border-bottom:1px solid #1e3d6b">Staff</th>'
+    + '<th style="text-align:left;padding:6px 4px;border-bottom:1px solid #1e3d6b">Month</th>'
+    + '<th style="text-align:right;padding:6px 4px;border-bottom:1px solid #1e3d6b">Amount</th>'
+    + '<th style="text-align:left;padding:6px 4px;border-bottom:1px solid #1e3d6b">Note</th>'
+    + '</tr>';
+
+  data.forEach(h => {
+    const date    = new Date(h.created_at).toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'numeric'});
+    const time    = new Date(h.created_at).toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'});
+    const name    = h.staff ? h.staff.name : 'Unknown';
+    const month   = MONTHS[h.month_idx] || '';
+    const action  = h.action === 'topup'
+      ? '<span style="color:#ffc107">+' + h.amount_change + ' (top-up)</span>'
+      : '<span style="color:#5fdb80">GH&#x20B5;' + h.amount_change + '</span>';
+
+    html += '<tr style="border-bottom:1px solid #0f2044">'
+      + '<td style="padding:6px 4px;color:#a0bedd">' + date + '<br><span style="font-size:10px;color:#5b7fa3">' + time + '</span></td>'
+      + '<td style="padding:6px 4px;color:#c8dcf5">' + name + '</td>'
+      + '<td style="padding:6px 4px;color:#c8dcf5">' + month + '</td>'
+      + '<td style="padding:6px 4px;text-align:right">' + action + '</td>'
+      + '<td style="padding:6px 4px;color:#7eb3e8;font-size:11px">' + (h.note || '') + '</td>'
+      + '</tr>';
+  });
+
+  html += '</table>';
+  html += '<div style="color:#5b7fa3;font-size:11px;text-align:center;margin-top:8px">Showing ' + data.length + ' most recent entries (excl. import)</div>';
+  resultsEl.innerHTML = html;
 }
 
 // ── Edit Staff ───────────────────────────────────────────────
