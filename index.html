@@ -539,6 +539,26 @@ footer { color: #1e3d6b; font-size: 11px; text-align: center; padding: 16px; mar
       <div id="auditLogResults" style="font-size:12px;max-height:400px;overflow-y:auto"></div>
     </div>
 
+    <!-- Arrears List Export -->
+    <div class="section-head">Export Arrears List</div>
+    <div style="background:#162d55;border-radius:12px;padding:16px;margin-bottom:16px">
+      <div style="color:#a0bedd;font-size:12px;margin-bottom:12px">Download a list of all staff with outstanding payments as at the current arrears month.</div>
+      <button onclick="exportArrears()" style="width:100%;padding:12px;background:#c0392b;border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:700;cursor:pointer">&#11015; Download Arrears List</button>
+      <div id="arrearsMsg" style="margin-top:8px;font-size:12px;text-align:center;display:none"></div>
+    </div>
+
+    <!-- Reactivate Staff -->
+    <div class="section-head">Reactivate Staff</div>
+    <div style="background:#162d55;border-radius:12px;padding:16px;margin-bottom:16px">
+      <div style="color:#a0bedd;font-size:12px;margin-bottom:12px">Restore a deactivated staff member to active status.</div>
+      <div style="margin-bottom:14px">
+        <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">Inactive Staff</label>
+        <select id="reactivateStaff" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:14px;outline:none"></select>
+      </div>
+      <button onclick="reactivateStaffMember()" style="width:100%;padding:12px;background:#28a745;border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:700;cursor:pointer">Reactivate Staff Member</button>
+      <div id="reactivateMsg" style="margin-top:8px;font-size:12px;text-align:center;display:none"></div>
+    </div>
+
     <!-- Edit Staff Details -->
     <div class="section-head">Edit Staff Details</div>
     <div style="background:#162d55;border-radius:12px;padding:16px;margin-bottom:16px">
@@ -1609,6 +1629,15 @@ async function setupAdminPanel() {
     '<option value="'+s[4]+'">'+s[1]+' ('+s[2]+')</option>'
   ).join('');
 
+  // Populate reactivate dropdown with inactive staff
+  const reactSel = document.getElementById('reactivateStaff');
+  if (reactSel) {
+    const inactive = (window._allStaffRows || []).filter(s => !s.is_active);
+    reactSel.innerHTML = inactive.length > 0
+      ? inactive.map(s => '<option value="'+s.id+'">'+s.name+' ('+s.department+')</option>').join('')
+      : '<option value="">No inactive staff</option>';
+  }
+
   // Populate audit log filters
   const auditStaffSel = document.getElementById('auditStaffFilter');
   if (auditStaffSel) {
@@ -1937,6 +1966,85 @@ async function loadAuditLog() {
   html += '</table>';
   html += '<div style="color:#5b7fa3;font-size:11px;text-align:center;margin-top:8px">Showing ' + data.length + ' most recent entries (excl. import)</div>';
   resultsEl.innerHTML = html;
+}
+
+// ── Arrears Export ───────────────────────────────────────────
+function exportArrears() {
+  const msg = document.getElementById('arrearsMsg');
+  showAdminMsg(msg, 'Generating...', '#a0bedd');
+
+  const currentMonth = MONTHS[CURRENT_IDX];
+  const lines = [];
+  lines.push('CCTI Staff Welfare Association');
+  lines.push('Arrears List as at ' + currentMonth.replace(/\'(\d{2})/, (_, y) => ' 20' + y));
+  lines.push('='.repeat(50));
+  lines.push('');
+
+  const arrears = [];
+  STAFF.forEach((s, si) => {
+    const [num, name, dept, payments] = s;
+    const joinIdx = payments.findIndex(v => v !== null);
+    const behindTotal = payments.slice(joinIdx, DUE_MONTHS)
+      .reduce((sum, v) => v === null || v < 40 ? sum + (40 - (v || 0)) : sum, 0);
+    if (behindTotal > 0) {
+      const monthsBehind = payments.slice(joinIdx, DUE_MONTHS)
+        .filter(v => v === null || v < 40).length;
+      arrears.push({ num, name, dept, monthsBehind, behindTotal });
+    }
+  });
+
+  // Sort by amount owed descending
+  arrears.sort((a, b) => b.behindTotal - a.behindTotal);
+
+  // Group by department
+  const byDept = {};
+  arrears.forEach(s => {
+    if (!byDept[s.dept]) byDept[s.dept] = [];
+    byDept[s.dept].push(s);
+  });
+
+  let serial = 1;
+  Object.entries(byDept).forEach(([dept, staff]) => {
+    lines.push(dept.toUpperCase());
+    lines.push('-'.repeat(30));
+    staff.forEach(s => {
+      lines.push(serial + '. ' + s.name + ' — '
+        + s.monthsBehind + ' month' + (s.monthsBehind > 1 ? 's' : '')
+        + ' — GH₵' + s.behindTotal.toLocaleString());
+      serial++;
+    });
+    lines.push('');
+  });
+
+  lines.push('='.repeat(50));
+  lines.push('Total staff in arrears: ' + arrears.length);
+  lines.push('Total amount outstanding: GH₵' + arrears.reduce((s,a) => s+a.behindTotal, 0).toLocaleString());
+
+  const blob = new Blob([lines.join('\n')], {type: 'text/plain;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'CCTI_Arrears_' + currentMonth.replace(/[^a-zA-Z0-9]/g, '_') + '.txt';
+  a.click();
+  showAdminMsg(msg, arrears.length + ' staff in arrears exported.', '#5fdb80');
+}
+
+// ── Reactivate Staff ──────────────────────────────────────────
+async function reactivateStaffMember() {
+  const sel  = document.getElementById('reactivateStaff');
+  const id   = parseInt(sel.value);
+  const name = sel.options[sel.selectedIndex]?.text;
+  const msg  = document.getElementById('reactivateMsg');
+
+  if (!id) { showAdminMsg(msg, 'No inactive staff to reactivate.', '#ff8080'); return; }
+  if (!confirm('Reactivate ' + name + '? They will appear in the staff list again.')) return;
+
+  showAdminMsg(msg, 'Updating...', '#a0bedd');
+  const { error } = await db.from('staff').update({ is_active: true }).eq('id', id);
+  if (error) { showAdminMsg(msg, 'Error: ' + error.message, '#ff8080'); return; }
+
+  showAdminMsg(msg, name + ' reactivated. Refresh to update the list.', '#5fdb80');
+  sel.remove(sel.selectedIndex);
+  if (sel.options.length === 0) sel.innerHTML = '<option>No inactive staff</option>';
 }
 
 // ── Edit Staff ───────────────────────────────────────────────
