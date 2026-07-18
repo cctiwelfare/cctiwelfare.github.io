@@ -508,6 +508,18 @@ footer { color: #1e3d6b; font-size: 11px; text-align: center; padding: 16px; mar
   </div>
 </div>
 
+<!-- Payment Confirm Modal -->
+<div id="payConfirmModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:999;align-items:center;justify-content:center;padding:20px">
+  <div style="background:#162d55;border-radius:14px;width:100%;max-width:380px;box-shadow:0 8px 32px rgba(0,0,0,.6);overflow:hidden">
+    <div style="background:#1a3d6b;padding:14px 18px;font-size:13px;font-weight:700;color:#7eb3e8;letter-spacing:.5px;text-transform:uppercase">Confirm Payment</div>
+    <div id="payConfirmBody" style="padding:16px 18px;font-size:13px;color:#c8dcf5;max-height:60vh;overflow-y:auto"></div>
+    <div style="display:flex;gap:10px;padding:14px 18px;border-top:1px solid #1e3d6b">
+      <button id="payConfirmCancel" style="flex:1;padding:11px;background:none;border:1px solid #2e5fa3;border-radius:8px;color:#7eb3e8;font-size:14px;cursor:pointer">Cancel</button>
+      <button id="payConfirmOK" style="flex:2;padding:11px;background:#28a745;border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:700;cursor:pointer">Confirm &amp; Save</button>
+    </div>
+  </div>
+</div>
+
 <footer>CCTI Welfare Association &middot; 2025/2026</footer>
 
 <script>
@@ -1155,6 +1167,18 @@ let _pendingStartMonth = null;
 let _pendingStaffIdx   = null;
 
 // Track last edit for Supabase save
+// Custom payment confirm modal
+let _confirmResolve = null;
+function showPayConfirm(html) {
+  return new Promise(resolve => {
+    _confirmResolve = resolve;
+    document.getElementById('payConfirmBody').innerHTML = html;
+    document.getElementById('payConfirmModal').style.display = 'flex';
+    document.getElementById('payConfirmOK').onclick     = () => { document.getElementById('payConfirmModal').style.display = 'none'; resolve(true); };
+    document.getElementById('payConfirmCancel').onclick = () => { document.getElementById('payConfirmModal').style.display = 'none'; resolve(false); };
+  });
+}
+
 function updateNoteFromDate() {
   const dateEl = document.getElementById('paymentDateReceived');
   const noteEl = document.getElementById('paymentNote');
@@ -1208,7 +1232,23 @@ async function saveChanges() {
   if (remaining > 0) msg += '\nNote: GH₵' + remaining + ' could not be applied (all months full).';
   msg += '\n\nConfirm?';
 
-  if (!confirm(msg)) return;
+  // Build HTML version of message
+  let html = '<div style="margin-bottom:12px;color:#a0bedd;font-size:12px">The following payments will be recorded:</div>';
+  html += '<div style="background:#0f2044;border-radius:8px;padding:12px;margin-bottom:12px">';
+  edits.forEach(e => {
+    const topup = e.oldVal > 0 ? ' <span style="color:#ffc107">(top-up from GH₵'+e.oldVal+')</span>' : '';
+    html += '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #1e3d6b">'
+      + '<span>'+MONTHS[e.monthIdx]+'</span>'
+      + '<span style="color:#5fdb80;font-weight:700">GH₵'+e.received+'</span>'
+      + topup + '</div>';
+  });
+  html += '</div>';
+  if (remaining > 0) html += '<div style="color:#ff8080;font-size:12px;margin-bottom:8px">GH₵'+remaining+' could not be applied (all months full).</div>';
+  const totalReceived = edits.reduce((s,e) => s+e.received, 0);
+  html += '<div style="display:flex;justify-content:space-between;font-weight:700;color:#fff;font-size:14px"><span>Total</span><span>GH₵'+totalReceived+'</span></div>';
+
+  const confirmed = await showPayConfirm(html);
+  if (!confirmed) return;
 
   // Save each edit
   const saveBtn = document.querySelector('#saveBar .save-btn');
