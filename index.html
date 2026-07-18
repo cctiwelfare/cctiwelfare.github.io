@@ -627,10 +627,12 @@ async function loadData() {
       if (!noteMap[p.staff_id]) noteMap[p.staff_id] = {};
       payMap[p.staff_id][p.month_idx]  = p.amount;
       if (p.note) noteMap[p.staff_id][p.month_idx] = p.note;
-      if (p.amount > 0 && p.updated_at && p.updated_at > importCutoff) {
-        if (!dateMap[p.staff_id] || p.updated_at > dateMap[p.staff_id].date) {
-          dateMap[p.staff_id] = { date: p.updated_at, amount: p.amount };
-        } else if (p.updated_at.slice(0,10) === dateMap[p.staff_id].date.slice(0,10)) {
+      // Use received_date if available, otherwise updated_at
+      const payDate = p.received_date ? p.received_date + 'T00:00:00Z' : p.updated_at;
+      if (p.amount > 0 && payDate && payDate > importCutoff) {
+        if (!dateMap[p.staff_id] || payDate > dateMap[p.staff_id].date) {
+          dateMap[p.staff_id] = { date: payDate, amount: p.amount };
+        } else if (payDate.slice(0,10) === dateMap[p.staff_id].date.slice(0,10)) {
           dateMap[p.staff_id].amount += p.amount;
         }
       }
@@ -690,7 +692,7 @@ async function loadData() {
 }
 
 // ── Save payment to Supabase ──────────────────────────────────
-async function savePaymentToDb(staffDbId, staffName, monthIdx, amount, note) {
+async function savePaymentToDb(staffDbId, staffName, monthIdx, amount, note, dateReceived) {
   const saveBar = document.getElementById('saveBar');
   const saveBtn = saveBar.querySelector('.save-btn');
   saveBtn.textContent = 'Saving...';
@@ -699,13 +701,14 @@ async function savePaymentToDb(staffDbId, staffName, monthIdx, amount, note) {
   try {
     const { data: { user } } = await db.auth.getUser();
     const payload = {
-      staff_id:   staffDbId,
-      period_id:  PERIOD_ID,
-      month_idx:  monthIdx,
-      amount:     amount || 0,
-      note:       note || null,
-      entered_by: user ? user.email : null,
-      updated_at: new Date().toISOString()
+      staff_id:      staffDbId,
+      period_id:     PERIOD_ID,
+      month_idx:     monthIdx,
+      amount:        amount || 0,
+      note:          note || null,
+      received_date: dateReceived || null,
+      entered_by:    user ? user.email : null,
+      updated_at:    new Date().toISOString()
     };
     const { error } = await db.from('payments').upsert(payload, { onConflict: 'staff_id,period_id,month_idx' });
     if (error) throw error;
@@ -1096,7 +1099,13 @@ ${buildStatusBar(payments, joinIdx)}
         return '<div style="font-size:11px;color:#6a8ab5;text-align:center;padding:4px 0">Last payment: GH&#x20B5;' + info.amount.toLocaleString() + ' on ' + lastDate + '</div>';
       })()}
       <div class="save-bar" id="saveBar">
-        <input type="text" class="note-input" id="paymentNote" placeholder="Add a note e.g. cash received 15/07/26 (optional)">
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <div style="flex:1">
+            <label style="display:block;font-size:10px;color:#276c3a;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">Date Received</label>
+            <input type="date" class="note-input" id="paymentDateReceived" style="margin-bottom:0" onchange="updateNoteFromDate()">
+          </div>
+        </div>
+        <input type="text" class="note-input" id="paymentNote" placeholder="Note">
         <button class="save-btn" onclick="saveChanges()">Save Payment</button>
         <div class="save-note">Saves directly to the database</div>
       </div>
@@ -1130,6 +1139,10 @@ function startEdit(row) {
     _lastEdit = { staffDbId: STAFF[staffIdx][4], staffName: STAFF[staffIdx][1], monthIdx, amount: v };
     showCard(STAFF[staffIdx], staffIdx);
     document.getElementById('saveBar').classList.add('visible');
+    // Prefill date received with today and auto-fill note
+    const today = new Date().toISOString().slice(0,10);
+    const drEl = document.getElementById('paymentDateReceived');
+    if (drEl) { drEl.value = today; updateNoteFromDate(); }
   }
   input.addEventListener('blur', commit);
   input.addEventListener('keydown', e => {
@@ -1139,10 +1152,25 @@ function startEdit(row) {
 }
 
 // Track last edit for Supabase save
+function updateNoteFromDate() {
+  const dateEl = document.getElementById('paymentDateReceived');
+  const noteEl = document.getElementById('paymentNote');
+  if (!dateEl || !noteEl) return;
+  const d = dateEl.value;
+  if (!d) return;
+  const [y, m, day] = d.split('-');
+  const formatted = day + '/' + m + '/' + y;
+  // Only auto-update if note starts with "cash received on" or is empty
+  if (!noteEl.value || noteEl.value.startsWith('cash received on')) {
+    noteEl.value = 'cash received on ' + formatted;
+  }
+}
+
 function saveChanges() {
   if (!_lastEdit) return;
-  const note = document.getElementById('paymentNote') ? document.getElementById('paymentNote').value : '';
-  savePaymentToDb(_lastEdit.staffDbId, _lastEdit.staffName, _lastEdit.monthIdx, _lastEdit.amount, note);
+  const note     = document.getElementById('paymentNote') ? document.getElementById('paymentNote').value : '';
+  const dateRcvd = document.getElementById('paymentDateReceived') ? document.getElementById('paymentDateReceived').value : '';
+  savePaymentToDb(_lastEdit.staffDbId, _lastEdit.staffName, _lastEdit.monthIdx, _lastEdit.amount, note, dateRcvd);
 }
 
 
