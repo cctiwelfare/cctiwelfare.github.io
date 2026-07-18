@@ -464,9 +464,15 @@ footer { color: #1e3d6b; font-size: 11px; text-align: center; padding: 16px; mar
     <div class="section-head">Download Daily Payments Report</div>
     <div style="background:#162d55;border-radius:12px;padding:16px;margin-bottom:16px">
       <div style="color:#a0bedd;font-size:12px;margin-bottom:12px">Download a summary of all payments recorded on a specific date.</div>
-      <div style="margin-bottom:14px">
-        <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">Date</label>
-        <input type="date" id="reportDate" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:13px;outline:none;box-sizing:border-box">
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <div style="flex:1">
+          <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">From</label>
+          <input type="date" id="reportDateFrom" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:13px;outline:none;box-sizing:border-box">
+        </div>
+        <div style="flex:1">
+          <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">To</label>
+          <input type="date" id="reportDateTo" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:13px;outline:none;box-sizing:border-box">
+        </div>
       </div>
       <button onclick="downloadDailyReport()" style="width:100%;padding:12px;background:#2e75b6;border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:700;cursor:pointer">&#11015; Download Report</button>
       <div id="reportMsg" style="margin-top:8px;font-size:12px;text-align:center;display:none"></div>
@@ -1534,8 +1540,10 @@ async function setupAdminPanel() {
   const today = new Date().toISOString().slice(0,10);
   const dateEl = document.getElementById('glicoDate');
   if (dateEl) dateEl.value = today;
-  const reportDateEl = document.getElementById('reportDate');
-  if (reportDateEl) reportDateEl.value = today;
+  const reportDateFromEl = document.getElementById('reportDateFrom');
+  const reportDateToEl   = document.getElementById('reportDateTo');
+  if (reportDateFromEl) reportDateFromEl.value = today;
+  if (reportDateToEl)   reportDateToEl.value   = today;
 
   // Load existing Glico payments
   const { data: glicoList } = await db.from('glico_payments').select('*').eq('period_id', PERIOD_ID).order('paid_date');
@@ -1612,8 +1620,10 @@ async function addMonth() {
   const today = new Date().toISOString().slice(0,10);
   const dateEl = document.getElementById('glicoDate');
   if (dateEl) dateEl.value = today;
-  const reportDateEl = document.getElementById('reportDate');
-  if (reportDateEl) reportDateEl.value = today;
+  const reportDateFromEl = document.getElementById('reportDateFrom');
+  const reportDateToEl   = document.getElementById('reportDateTo');
+  if (reportDateFromEl) reportDateFromEl.value = today;
+  if (reportDateToEl)   reportDateToEl.value   = today;
 
   // Load existing Glico payments
   const { data: glicoList } = await db.from('glico_payments').select('*').eq('period_id', PERIOD_ID).order('paid_date');
@@ -1662,29 +1672,36 @@ function showAdminMsg(el, text, color) {
 
 // ── Daily Payments Report ────────────────────────────────────
 async function downloadDailyReport() {
-  const date    = document.getElementById('reportDate').value;
-  const msg     = document.getElementById('reportMsg');
-  if (!date) { showAdminMsg(msg, 'Please select a date.', '#ff8080'); return; }
+  const dateFrom = document.getElementById('reportDateFrom').value;
+  const dateTo   = document.getElementById('reportDateTo').value;
+  const msg      = document.getElementById('reportMsg');
+  if (!dateFrom || !dateTo) { showAdminMsg(msg, 'Please select a date range.', '#ff8080'); return; }
+  if (dateFrom > dateTo)    { showAdminMsg(msg, 'From date must be before To date.', '#ff8080'); return; }
 
   showAdminMsg(msg, 'Generating...', '#a0bedd');
 
-  // Fetch payments updated on this date
+  // Fetch payments with received_date in range
   const { data: payments, error } = await db.from('payments')
     .select('*, staff(name, department)')
     .eq('period_id', PERIOD_ID)
-    .eq('received_date', date)
+    .gte('received_date', dateFrom)
+    .lte('received_date', dateTo)
     .gt('amount', 0)
+    .order('received_date')
     .order('updated_at');
 
   if (error) { showAdminMsg(msg, 'Error: ' + error.message, '#ff8080'); return; }
   if (!payments || payments.length === 0) {
-    showAdminMsg(msg, 'No payments found for ' + date, '#ff8080'); return;
+    showAdminMsg(msg, 'No payments found for selected period.', '#ff8080'); return;
   }
 
-  // Format date as DD/MM/YYYY
-  const [y, m, d] = date.split('-');
-  const dateLabel = d + '/' + m + '/' + y;
-  const dateTitle = new Date(date).toLocaleDateString('en-GB', {day:'2-digit', month:'long', year:'numeric'});
+  // Format dates as DD/MM/YYYY
+  const [yf, mf, df] = dateFrom.split('-');
+  const [yt, mt, dt] = dateTo.split('-');
+  const dateLabelFrom = df + '/' + mf + '/' + yf;
+  const dateLabelTo   = dt + '/' + mt + '/' + yt;
+  const dateLabel     = dateFrom === dateTo ? dateLabelFrom : dateLabelFrom + ' – ' + dateLabelTo;
+  const singleDay     = dateFrom === dateTo;
 
   // Calculate running balance
   const { data: glicoData } = await db.from('glico_payments').select('amount').eq('period_id', PERIOD_ID);
@@ -1695,7 +1712,7 @@ async function downloadDailyReport() {
   const { data: prevPayments } = await db.from('payments')
     .select('amount_received, amount')
     .eq('period_id', PERIOD_ID)
-    .lt('received_date', date)
+    .lt('received_date', dateFrom)
     .gt('amount', 0);
   const prevTotal = (prevPayments || []).reduce((s,p) => s + (p.amount_received || p.amount), 0) + INACTIVE_TOTAL;
   const newTotal  = prevTotal + payments.reduce((s,p) => s + (p.amount_received || p.amount), 0);
@@ -1705,6 +1722,7 @@ async function downloadDailyReport() {
   lines.push('CCTI Staff Welfare Association');
   lines.push('Glico/Welfare Contributions');
   lines.push('Payments Update ' + dateLabel);
+  if (!singleDay) lines.push('Period: ' + dateLabelFrom + ' to ' + dateLabelTo);
   lines.push('');
   lines.push('Balance b/f - GH₵' + prevTotal.toLocaleString('en-GH', {minimumFractionDigits:2}) + '');
   lines.push('');
@@ -1718,7 +1736,9 @@ async function downloadDailyReport() {
     const month    = MONTHS[p.month_idx] || ('Month ' + p.month_idx);
     const received = p.amount_received || p.amount;
     const topup    = (p.amount - received) > 0 ? ' (top-up +' + received + ', total ' + p.amount + ')' : '';
-    lines.push(name + ' (' + dept + ') - ' + month + ': GH₵' + received + topup + ' (' + dateLabel + ')');
+    const pDate = p.received_date ? (p.received_date.split('-').reverse().join('/')) : dateLabel;
+    const dateStr = singleDay ? '(' + dateLabelFrom + ')' : '(' + pDate + ')';
+    lines.push(name + ' (' + dept + ') - ' + month + ': GH₵' + received + topup + ' ' + dateStr);
     dayTotal += received;
   });
 
@@ -1732,7 +1752,7 @@ async function downloadDailyReport() {
   const blob = new Blob([lines.join('\n')], {type: 'text/plain;charset=utf-8'});
   const a    = document.createElement('a');
   a.href     = URL.createObjectURL(blob);
-  a.download = 'Glico_Payments_Update_' + d + '_' + m + '_' + y + '.txt';
+  a.download = 'Glico_Payments_Update_' + df + '_' + mf + '_' + yf + (dateFrom !== dateTo ? '_to_' + dt + '_' + mt + '_' + yt : '') + '.txt';
   a.click();
 
   showAdminMsg(msg, payments.length + ' payments exported.', '#5fdb80');
