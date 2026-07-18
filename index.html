@@ -1598,6 +1598,9 @@ async function exportExcel() {
 
 // ── Admin Panel ───────────────────────────────────────────────
 async function setupAdminPanel() {
+  // Set today first — used throughout
+  const today = new Date().toISOString().slice(0,10);
+
   const joinedSel = document.getElementById('newStaffJoined');
   if (joinedSel) joinedSel.innerHTML = MONTHS.map((m,i) => '<option value="'+i+'">'+m+'</option>').join('');
 
@@ -1635,9 +1638,6 @@ async function setupAdminPanel() {
 
   const countEl = document.getElementById('currentMonthCount');
   if (countEl) countEl.textContent = MONTHS.length + ' months (' + MONTHS[0] + ' to ' + MONTHS[MONTHS.length-1] + ')';
-
-  // Set default date to today
-  const today = new Date().toISOString().slice(0,10);
   const dateEl = document.getElementById('glicoDate');
   if (dateEl) dateEl.value = today;
   const reportDateFromEl = document.getElementById('reportDateFrom');
