@@ -2082,7 +2082,6 @@ async function voidTransaction(txnId) {
 
   if (error || !entries || entries.length === 0) {
     showToast('Could not fetch transaction details.', '#ff8080'); return;
-    return;
   }
 
   const { data: { user } } = await db.auth.getUser();
@@ -2107,17 +2106,17 @@ async function voidTransaction(txnId) {
       }, { onConflict: 'staff_id,period_id,month_idx' });
     }
 
-    // Mark history entry as voided
-    await db.from('payment_history').update({
-      is_voided:  true,
-      voided_at:  now,
-      voided_by:  user ? user.email : null
-    }).eq('id', e.id);
-
     // Update local STAFF array
     const staffEntry = STAFF.find(s => s[4] === e.staff_id);
     if (staffEntry) staffEntry[3][e.month_idx] = (e.previous_amount && e.previous_amount > 0) ? e.previous_amount : null;
   }
+
+  // Mark ALL entries in this transaction as voided in one query
+  await db.from('payment_history').update({
+    is_voided:  true,
+    voided_at:  now,
+    voided_by:  user ? user.email : null
+  }).eq('transaction_id', txnId);
 
   // Record void in history
   await db.from('payment_history').insert({
