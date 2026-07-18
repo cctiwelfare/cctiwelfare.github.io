@@ -2249,7 +2249,7 @@ async function sendPaymentSMS(staffIdx, amountReceived, dateRcvd) {
   // Build message based on status
   let statusLine = '';
   if (behindTotal === 0 && paidAhead > 0) {
-    statusLine = 'Paid up to ' + currentMonth + '. ' + paidAhead + ' month' + (paidAhead>1?'s':'') + ' advance: GHS' + aheadTotal + '.';
+    statusLine = 'Paid up to ' + currentMonth + '. ' + paidAhead + ' month' + (paidAhead>1?'s':'') + ' in advance: GHS' + aheadTotal + '.';
   } else if (behindTotal === 0) {
     statusLine = 'Paid up to ' + currentMonth + '.';
   } else if (amountReceived > 0 && behind > 0) {
@@ -2258,7 +2258,7 @@ async function sendPaymentSMS(staffIdx, amountReceived, dateRcvd) {
     statusLine = 'You owe ' + behind + ' month' + (behind>1?'s':'') + ' up to ' + currentMonth + ': GHS' + behindTotal + '.';
   }
 
-  const message = 'Dear ' + name + ', GHS' + amountReceived + ' received ' + dateStr + '. ' + statusLine + ' Total paid: GHS' + total + '. -CCTI Staff Welfare';
+  const message = 'Dear ' + name + ', GHS' + amountReceived + ' received on ' + dateStr + '. ' + statusLine + ' Total paid: GHS' + total + '. -CCTI Staff Welfare';
 
   // Format phone number to international format
   let phoneNum = phone.replace(/\s/g, '');
