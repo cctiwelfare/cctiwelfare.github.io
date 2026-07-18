@@ -1837,14 +1837,16 @@ async function addStaff() {
   for (const s of (toShift || [])) {
     await db.from('staff').update({ sort_order: s.sort_order + 1 }).eq('id', s.id);
   }
+  const phone = document.getElementById('newStaffPhone').value.trim() || null;
   const { error } = await db.from('staff').insert({
     staff_no: String(newOrder), name, department: dept,
-    joined_month: joined, is_active: true, sort_order: newOrder
+    joined_month: joined, is_active: true, sort_order: newOrder, phone
   });
   if (error) { showAdminMsg(msg, 'Error: ' + error.message, '#ff8080'); return; }
   showAdminMsg(msg, name + ' added! Refresh to see them.', '#5fdb80');
-  document.getElementById('newStaffName').value = '';
-  document.getElementById('newStaffDept').value = '';
+  document.getElementById('newStaffName').value  = '';
+  document.getElementById('newStaffDept').value  = '';
+  document.getElementById('newStaffPhone').value = '';
 }
 
 async function addMonth() {
