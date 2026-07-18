@@ -2016,6 +2016,7 @@ async function loadLedger() {
     .select('*, staff(name, department)')
     .eq('period_id', PERIOD_ID)
     .neq('action', 'import')
+    .neq('action', 'void')
     .eq('is_voided', false)
     .order('created_at', { ascending: false })
     .limit(200);
