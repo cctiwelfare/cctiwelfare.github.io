@@ -516,6 +516,30 @@ footer { color: #1e3d6b; font-size: 11px; text-align: center; padding: 16px; mar
       <div id="deactivateMsg" style="margin-top:8px;font-size:12px;text-align:center;display:none"></div>
     </div>
 
+    <!-- Payment Ledger -->
+    <div class="section-head">Payment Ledger</div>
+    <div style="background:#162d55;border-radius:12px;padding:16px;margin-bottom:16px">
+      <div style="color:#a0bedd;font-size:12px;margin-bottom:12px">View, void or correct any payment transaction.</div>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <div style="flex:1">
+          <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">From</label>
+          <input type="date" id="ledgerDateFrom" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:12px;outline:none;box-sizing:border-box">
+        </div>
+        <div style="flex:1">
+          <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">To</label>
+          <input type="date" id="ledgerDateTo" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:12px;outline:none;box-sizing:border-box">
+        </div>
+      </div>
+      <div style="margin-bottom:10px">
+        <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">Staff (optional)</label>
+        <select id="ledgerStaffFilter" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:12px;outline:none">
+          <option value="">All Staff</option>
+        </select>
+      </div>
+      <button onclick="loadLedger()" style="width:100%;padding:11px;background:#1a4b8c;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:12px">Load Ledger</button>
+      <div id="ledgerResults" style="font-size:12px;max-height:500px;overflow-y:auto"></div>
+    </div>
+
     <!-- Payment Audit Log -->
     <div class="section-head">Payment Audit Log</div>
     <div style="background:#162d55;border-radius:12px;padding:16px;margin-bottom:16px">
@@ -582,6 +606,22 @@ footer { color: #1e3d6b; font-size: 11px; text-align: center; padding: 16px; mar
       <div id="editStaffMsg" style="margin-top:8px;font-size:12px;text-align:center;display:none"></div>
     </div>
 
+  </div>
+</div>
+
+<!-- Password Confirm Modal -->
+<div id="passwordConfirmModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:1001;align-items:center;justify-content:center;padding:20px">
+  <div style="background:#162d55;border-radius:14px;width:100%;max-width:340px;box-shadow:0 8px 32px rgba(0,0,0,.6);overflow:hidden">
+    <div style="background:#1a3d6b;padding:14px 18px;font-size:13px;font-weight:700;color:#7eb3e8;letter-spacing:.5px;text-transform:uppercase">Confirm Identity</div>
+    <div style="padding:16px 18px">
+      <div style="color:#a0bedd;font-size:12px;margin-bottom:14px" id="passwordConfirmMsg">Re-enter your password to continue.</div>
+      <input type="password" id="passwordConfirmInput" placeholder="Your password" style="width:100%;padding:11px 14px;border-radius:8px;border:2px solid #2e5fa3;background:#0f2044;color:#fff;font-size:14px;outline:none;box-sizing:border-box;margin-bottom:8px">
+      <div id="passwordConfirmError" style="color:#ff8080;font-size:12px;margin-bottom:8px;display:none">Incorrect password. Please try again.</div>
+      <div style="display:flex;gap:8px">
+        <button id="passwordConfirmCancel" style="flex:1;padding:11px;background:none;border:1px solid #2e5fa3;border-radius:8px;color:#7eb3e8;font-size:13px;cursor:pointer">Cancel</button>
+        <button id="passwordConfirmOK" style="flex:2;padding:11px;background:#2e75b6;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer">Confirm</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -789,7 +829,7 @@ async function loadData() {
 }
 
 // ── Save payment to Supabase ──────────────────────────────────
-async function savePaymentToDb(staffDbId, staffName, monthIdx, amount, note, dateReceived, amountReceived) {
+async function savePaymentToDb(staffDbId, staffName, monthIdx, amount, note, dateReceived, amountReceived, txnId, previousAmount) {
   const saveBar = document.getElementById('saveBar');
   const saveBtn = saveBar.querySelector('.save-btn');
   saveBtn.textContent = 'Saving...';
@@ -813,15 +853,17 @@ async function savePaymentToDb(staffDbId, staffName, monthIdx, amount, note, dat
 
     // Record in payment_history
     const historyPayload = {
-      staff_id:      staffDbId,
-      period_id:     PERIOD_ID,
-      month_idx:     monthIdx,
-      action:        (amountReceived && amountReceived < amount) ? 'topup' : 'new',
-      amount_change: amountReceived || amount || 0,
-      total_after:   amount || 0,
-      received_date: dateReceived || null,
-      note:          note || null,
-      entered_by:    user ? user.email : null,
+      staff_id:        staffDbId,
+      period_id:       PERIOD_ID,
+      month_idx:       monthIdx,
+      action:          (amountReceived && amountReceived < amount) ? 'topup' : 'new',
+      amount_change:   amountReceived || amount || 0,
+      total_after:     amount || 0,
+      previous_amount: previousAmount || 0,
+      received_date:   dateReceived || null,
+      note:            note || null,
+      entered_by:      user ? user.email : null,
+      transaction_id:  txnId || null,
     };
     await db.from('payment_history').insert(historyPayload);
 
@@ -1259,6 +1301,49 @@ let _pendingStartMonth = null;
 let _pendingStaffIdx   = null;
 
 // Track last edit for Supabase save
+// Password confirmation modal
+let _passwordConfirmResolve = null;
+function requirePassword(message) {
+  return new Promise(resolve => {
+    _passwordConfirmResolve = resolve;
+    const modal  = document.getElementById('passwordConfirmModal');
+    const input  = document.getElementById('passwordConfirmInput');
+    const errEl  = document.getElementById('passwordConfirmError');
+    const msgEl  = document.getElementById('passwordConfirmMsg');
+    if (message) msgEl.textContent = message;
+    input.value = '';
+    errEl.style.display = 'none';
+    modal.style.display = 'flex';
+    setTimeout(() => input.focus(), 100);
+
+    document.getElementById('passwordConfirmOK').onclick = async () => {
+      const password = input.value;
+      if (!password) return;
+      // Re-authenticate with Supabase
+      const email = document.getElementById('adminEmail').textContent;
+      const { error } = await db.auth.signInWithPassword({ email, password });
+      if (error) {
+        errEl.style.display = 'block';
+        input.value = '';
+        input.focus();
+        return;
+      }
+      modal.style.display = 'none';
+      resolve(true);
+    };
+
+    document.getElementById('passwordConfirmCancel').onclick = () => {
+      modal.style.display = 'none';
+      resolve(false);
+    };
+
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('passwordConfirmOK').click();
+      if (e.key === 'Escape') document.getElementById('passwordConfirmCancel').click();
+    });
+  });
+}
+
 // Custom payment confirm modal
 let _confirmResolve = null;
 function showPayConfirm(html) {
@@ -1348,6 +1433,9 @@ async function saveChanges() {
   saveBtn.disabled = true;
 
   try {
+    // Generate a transaction_id to group all edits in this lump sum
+    const txnId = crypto.randomUUID();
+
     for (const e of edits) {
       // Fetch existing note to append
       const { data: existing } = await db.from('payments')
@@ -1366,7 +1454,8 @@ async function saveChanges() {
 
       await savePaymentToDb(
         STAFF[staffIdx][4], STAFF[staffIdx][1],
-        e.monthIdx, e.newVal, newNote, dateRcvd, e.received
+        e.monthIdx, e.newVal, newNote, dateRcvd, e.received,
+        txnId, e.oldVal
       );
 
       // Update local STAFF array
@@ -1631,6 +1720,17 @@ async function setupAdminPanel() {
       : '<option value="">No inactive staff</option>';
   }
 
+  // Populate ledger filters
+  const ledgerStaffSel = document.getElementById('ledgerStaffFilter');
+  if (ledgerStaffSel) {
+    ledgerStaffSel.innerHTML = '<option value="">All Staff</option>'
+      + STAFF.map(s => '<option value="'+s[4]+'">'+s[1]+'</option>').join('');
+  }
+  const ledgerFrom = document.getElementById('ledgerDateFrom');
+  const ledgerTo   = document.getElementById('ledgerDateTo');
+  if (ledgerFrom) ledgerFrom.value = today;
+  if (ledgerTo)   ledgerTo.value   = today;
+
   // Populate audit log filters
   const auditStaffSel = document.getElementById('auditStaffFilter');
   if (auditStaffSel) {
@@ -1885,6 +1985,144 @@ async function downloadDailyReport() {
   a.click();
 
   showAdminMsg(msg, payments.length + ' payments exported.', '#5fdb80');
+}
+
+// ── Payment Ledger ───────────────────────────────────────────
+async function loadLedger() {
+  // Require password confirmation to access ledger
+  const confirmed = await requirePassword('Re-enter your password to access the Payment Ledger.');
+  if (!confirmed) return;
+
+  const dateFrom  = document.getElementById('ledgerDateFrom').value;
+  const dateTo    = document.getElementById('ledgerDateTo').value;
+  const staffId   = document.getElementById('ledgerStaffFilter').value;
+  const resultsEl = document.getElementById('ledgerResults');
+
+  resultsEl.innerHTML = '<div style="color:#a0bedd;text-align:center;padding:12px">Loading...</div>';
+
+  let query = db.from('payment_history')
+    .select('*, staff(name, department)')
+    .eq('period_id', PERIOD_ID)
+    .neq('action', 'import')
+    .eq('is_voided', false)
+    .order('created_at', { ascending: false })
+    .limit(200);
+
+  if (dateFrom) query = query.gte('created_at', dateFrom + 'T00:00:00Z');
+  if (dateTo)   query = query.lte('created_at', dateTo   + 'T23:59:59Z');
+  if (staffId)  query = query.eq('staff_id', staffId);
+
+  const { data, error } = await query;
+  if (error) { resultsEl.innerHTML = '<div style="color:#ff8080">Error: ' + error.message + '</div>'; return; }
+  if (!data || data.length === 0) { resultsEl.innerHTML = '<div style="color:#a0bedd;text-align:center;padding:12px">No transactions found.</div>'; return; }
+
+  // Group by transaction_id
+  const txns = {};
+  data.forEach(h => {
+    const key = h.transaction_id || h.id;
+    if (!txns[key]) txns[key] = { entries: [], created_at: h.created_at, staff: h.staff, entered_by: h.entered_by, received_date: h.received_date };
+    txns[key].entries.push(h);
+  });
+
+  let html = '';
+  Object.entries(txns).forEach(([txnId, txn]) => {
+    const date     = new Date(txn.created_at).toLocaleDateString('en-GB', {day:'2-digit', month:'short', year:'numeric'});
+    const time     = new Date(txn.created_at).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+    const name     = txn.staff ? txn.staff.name : 'Unknown';
+    const total    = txn.entries.reduce((s,e) => s + e.amount_change, 0);
+    const months   = txn.entries.map(e => MONTHS[e.month_idx]).join(', ');
+    const rcvdDate = txn.received_date ? new Date(txn.received_date + 'T00:00:00').toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'numeric'}) : '';
+
+    html += '<div style="background:#0f2044;border-radius:10px;padding:12px;margin-bottom:10px">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">';
+    html += '<div><div style="color:#fff;font-weight:700;font-size:13px">' + name + '</div>'
+          + '<div style="color:#7eb3e8;font-size:11px;margin-top:2px">' + date + ' ' + time + (rcvdDate ? ' · Received: ' + rcvdDate : '') + '</div></div>';
+    html += '<div style="text-align:right"><div style="color:#5fdb80;font-weight:700;font-size:14px">GH&#x20B5;' + total + '</div>'
+          + '<div style="color:#7eb3e8;font-size:10px">' + txn.entries.length + ' month' + (txn.entries.length > 1 ? 's' : '') + '</div></div>';
+    html += '</div>';
+    html += '<div style="color:#a0bedd;font-size:11px;margin-bottom:8px">' + months + '</div>';
+    if (txn.entries[0].note) html += '<div style="color:#7eb3e8;font-size:11px;font-style:italic;margin-bottom:8px">' + txn.entries[0].note + '</div>';
+    html += '<button onclick="voidTransaction(\"' + txnId + '\")" style="width:100%;padding:8px;background:#3a1a1a;border:1px solid #c0392b;border-radius:6px;color:#ff8080;font-size:12px;cursor:pointer;font-weight:600">&#x2715; Void This Transaction</button>';
+    html += '</div>';
+  });
+
+  resultsEl.innerHTML = html + '<div style="color:#5b7fa3;font-size:11px;text-align:center;margin-top:4px">Showing ' + Object.keys(txns).length + ' transactions</div>';
+}
+
+async function voidTransaction(txnId) {
+  // Require password again before voiding
+  const pwOk = await requirePassword('Re-enter your password to void this transaction.');
+  if (!pwOk) return;
+
+  const confirmed = await showPayConfirm(
+    '<div style="color:#ff8080;margin-bottom:12px;font-size:14px;font-weight:700">&#9888; Void Transaction</div>'
+    + '<div style="color:#c8dcf5;margin-bottom:12px">This will reverse all payments in this transaction, restoring each month to its previous value.</div>'
+    + '<div style="color:#ffc107;font-size:12px">This action cannot be undone.</div>'
+  );
+  if (!confirmed) return;
+
+  // Fetch all entries in this transaction
+  const { data: entries, error } = await db.from('payment_history')
+    .select('*')
+    .eq('transaction_id', txnId)
+    .eq('period_id', PERIOD_ID);
+
+  if (error || !entries || entries.length === 0) {
+    alert('Could not fetch transaction details.');
+    return;
+  }
+
+  const { data: { user } } = await db.auth.getUser();
+  const now = new Date().toISOString();
+
+  // Reverse each entry
+  for (const e of entries) {
+    // Restore previous amount in payments table
+    await db.from('payments').upsert({
+      staff_id:   e.staff_id,
+      period_id:  PERIOD_ID,
+      month_idx:  e.month_idx,
+      amount:     e.previous_amount || 0,
+      updated_at: now
+    }, { onConflict: 'staff_id,period_id,month_idx' });
+
+    // Mark history entry as voided
+    await db.from('payment_history').update({
+      is_voided:  true,
+      voided_at:  now,
+      voided_by:  user ? user.email : null
+    }).eq('id', e.id);
+
+    // Update local STAFF array
+    const staffEntry = STAFF.find(s => s[4] === e.staff_id);
+    if (staffEntry) staffEntry[3][e.month_idx] = e.previous_amount || null;
+  }
+
+  // Record void in history
+  await db.from('payment_history').insert({
+    staff_id:       entries[0].staff_id,
+    period_id:      PERIOD_ID,
+    month_idx:      entries[0].month_idx,
+    action:         'void',
+    amount_change:  -entries.reduce((s,e) => s+e.amount_change, 0),
+    total_after:    entries[0].previous_amount || 0,
+    entered_by:     user ? user.email : null,
+    transaction_id: txnId,
+    note:           'Void of transaction ' + txnId.slice(0,8)
+  });
+
+  // Recalculate totals
+  MONTHLY_TOTALS = new Array(MONTHS.length).fill(0);
+  STAFF.forEach(([,,,p]) => p.forEach((v,i) => { if (v) MONTHLY_TOTALS[i] += v; }));
+  TOTAL_COLLECTED = MONTHLY_TOTALS.reduce((a,b) => a+b, 0) + INACTIVE_TOTAL;
+
+  alert('Transaction voided successfully. Re-enter the correct amount.');
+  loadLedger();
+
+  // Refresh card if open
+  const searchVal = document.getElementById('searchInput').value;
+  const idx = STAFF.findIndex(s => s[1] === searchVal);
+  if (idx > -1) showCard(STAFF[idx], idx);
 }
 
 // ── Payment Audit Log ────────────────────────────────────────
