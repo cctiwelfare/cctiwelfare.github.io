@@ -1272,13 +1272,14 @@ async function startEdit(row) {
   modal.style.display = 'flex';
 
   // Fetch history for this staff + month
-  const { data: history } = await db.from('payment_history')
+  const { data: historyRaw } = await db.from('payment_history')
     .select('*')
     .eq('staff_id', STAFF[staffIdx][4])
     .eq('period_id', PERIOD_ID)
     .eq('month_idx', monthIdx)
-    .or('action.neq.import,received_date.not.is.null')
     .order('created_at');
+  // Show app entries always; show import entries only if they have a received_date
+  const history = (historyRaw || []).filter(h => h.action !== 'import' || h.received_date);
 
   if (!history || history.length === 0) {
     body.innerHTML = '<div style="color:#5b7fa3;text-align:center;padding:12px">No payment history recorded.</div>';
