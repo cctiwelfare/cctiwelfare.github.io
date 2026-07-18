@@ -474,6 +474,11 @@ footer { color: #1e3d6b; font-size: 11px; text-align: center; padding: 16px; mar
           <input type="date" id="reportDateTo" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:13px;outline:none;box-sizing:border-box">
         </div>
       </div>
+      <div style="margin-bottom:14px">
+        <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">Opening Balance (GH&#x20B5;)</label>
+        <input type="number" id="reportOpeningBalance" placeholder="e.g. 37350" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:13px;outline:none;box-sizing:border-box">
+        <div style="font-size:11px;color:#5b7fa3;margin-top:4px">Auto-calculated from base balance of GH&#x20B5;37,350 on 18/07/2026</div>
+      </div>
       <button onclick="downloadDailyReport()" style="width:100%;padding:12px;background:#2e75b6;border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:700;cursor:pointer">&#11015; Download Report</button>
       <div id="reportMsg" style="margin-top:8px;font-size:12px;text-align:center;display:none"></div>
     </div>
@@ -695,6 +700,12 @@ async function loadData() {
     GLICO_PAID = glico.map(g => ({ label: g.label, amount: g.amount }));
 
     clearTimeout(timeout);
+    // Load settings
+    const { data: settingsRows } = await db.from('settings').select('*');
+    if (settingsRows) {
+      settingsRows.forEach(s => { window._settings = window._settings || {}; window._settings[s.key] = s.value; });
+    }
+
     document.getElementById('loadingScreen').style.display = 'none';
     document.getElementById('adminLoginBtn').style.display = IS_ADMIN ? 'none' : 'block';
 
@@ -1544,6 +1555,11 @@ async function setupAdminPanel() {
   const reportDateToEl   = document.getElementById('reportDateTo');
   if (reportDateFromEl) reportDateFromEl.value = today;
   if (reportDateToEl)   reportDateToEl.value   = today;
+  // Show base balance info
+  const baseBalance     = parseFloat((window._settings && window._settings['base_balance']) || '0');
+  const baseBalanceDate = (window._settings && window._settings['base_balance_date']) || '2026-07-18';
+  const obEl = document.getElementById('reportOpeningBalance');
+  if (obEl) obEl.placeholder = 'Auto-calculated from ' + baseBalanceDate;
 
   // Load existing Glico payments
   const { data: glicoList } = await db.from('glico_payments').select('*').eq('period_id', PERIOD_ID).order('paid_date');
@@ -1624,6 +1640,11 @@ async function addMonth() {
   const reportDateToEl   = document.getElementById('reportDateTo');
   if (reportDateFromEl) reportDateFromEl.value = today;
   if (reportDateToEl)   reportDateToEl.value   = today;
+  // Show base balance info
+  const baseBalance     = parseFloat((window._settings && window._settings['base_balance']) || '0');
+  const baseBalanceDate = (window._settings && window._settings['base_balance_date']) || '2026-07-18';
+  const obEl = document.getElementById('reportOpeningBalance');
+  if (obEl) obEl.placeholder = 'Auto-calculated from ' + baseBalanceDate;
 
   // Load existing Glico payments
   const { data: glicoList } = await db.from('glico_payments').select('*').eq('period_id', PERIOD_ID).order('paid_date');
@@ -1708,14 +1729,28 @@ async function downloadDailyReport() {
   const totalGlico = (glicoData || []).reduce((s,g) => s + g.amount, 0);
 
   // Get previous total (all payments before this date)
-  // Previous total = all payments with received_date before selected date
-  const { data: prevPayments } = await db.from('payments')
-    .select('amount_received, amount')
-    .eq('period_id', PERIOD_ID)
-    .lt('received_date', dateFrom)
-    .gt('amount', 0);
-  const prevTotal = (prevPayments || []).reduce((s,p) => s + (p.amount_received || p.amount), 0) + INACTIVE_TOTAL;
-  const newTotal  = prevTotal + payments.reduce((s,p) => s + (p.amount_received || p.amount), 0);
+  // Calculate opening balance automatically
+  const baseBalance     = parseFloat((window._settings && window._settings['base_balance']) || '0');
+  const baseBalanceDate = (window._settings && window._settings['base_balance_date']) || '2026-07-18';
+
+  // Sum all received payments from base date up to (not including) dateFrom
+  let prevTotal = baseBalance;
+  if (dateFrom > baseBalanceDate) {
+    const { data: prevPayments } = await db.from('payments')
+      .select('amount_received, amount')
+      .eq('period_id', PERIOD_ID)
+      .gte('received_date', baseBalanceDate)
+      .lt('received_date', dateFrom)
+      .gt('amount', 0);
+    prevTotal += (prevPayments || []).reduce((s,p) => s + (p.amount_received || p.amount), 0);
+  }
+
+  // Update the opening balance field to show calculated value
+  const openingBalanceEl = document.getElementById('reportOpeningBalance');
+  if (openingBalanceEl) openingBalanceEl.value = prevTotal;
+
+  const dayTotal2 = payments.reduce((s,p) => s + (p.amount_received || p.amount), 0);
+  const newTotal  = prevTotal + dayTotal2;
 
   // Build txt content matching your format
   let lines = [];
@@ -1724,7 +1759,7 @@ async function downloadDailyReport() {
   lines.push('Payments Update ' + dateLabel);
   if (!singleDay) lines.push('Period: ' + dateLabelFrom + ' to ' + dateLabelTo);
   lines.push('');
-  lines.push('Balance b/f - GH₵' + prevTotal.toLocaleString('en-GH', {minimumFractionDigits:2}) + '');
+  lines.push('Balance b/f - GH₵' + prevTotal.toLocaleString('en-GH', {minimumFractionDigits:2}));
   lines.push('');
   lines.push('New Payments:');
   lines.push('');
@@ -1745,7 +1780,7 @@ async function downloadDailyReport() {
   lines.push('');
   lines.push('Total - GH₵' + dayTotal.toLocaleString('en-GH', {minimumFractionDigits:2}));
   lines.push('');
-  lines.push('This will change the overall total from GH₵' + prevTotal.toLocaleString('en-GH', {minimumFractionDigits:2}) + ' to GH₵' + newTotal.toLocaleString('en-GH', {minimumFractionDigits:2}));
+  lines.push('This changes the overall total from GH₵' + prevTotal.toLocaleString('en-GH', {minimumFractionDigits:2}) + ' to GH₵' + newTotal.toLocaleString('en-GH', {minimumFractionDigits:2}));
   lines.push('');
   lines.push('Balance c/d - GH₵' + newTotal.toLocaleString('en-GH', {minimumFractionDigits:2}));
 
