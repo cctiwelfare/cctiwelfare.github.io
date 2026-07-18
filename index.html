@@ -860,11 +860,7 @@ async function savePaymentToDb(staffDbId, staffName, monthIdx, amount, note, dat
   }
 }
 
-function saveChanges() {
-  if (!_lastEdit) return;
-  const note = document.getElementById('paymentNote') ? document.getElementById('paymentNote').value : '';
-  savePaymentToDb(_lastEdit.staffDbId, _lastEdit.staffName, _lastEdit.monthIdx, _lastEdit.amount, note);
-}
+// saveChanges is defined as async function below
 
 function computeStats() {
   // Total collected = injected from generator (includes excluded staff contributions)
@@ -1195,10 +1191,10 @@ function showCard([num, name, dept, payments], staffIdx) {
   const monthsHTML = payments.map((val, i) => {
     let cls, badge;
     if (i < joinIdx)       { cls = 'pre-member'; badge = 'n/a'; }
-    else if (val === null) { cls = IS_ADMIN ? 'unpaid editable' : 'unpaid viewable'; badge = '—'; }
-    else if (val === 0)    { cls = IS_ADMIN ? 'arrears editable' : 'arrears viewable'; badge = '0'; }
+    else if (val === null) { cls = IS_ADMIN ? 'unpaid editable' : 'unpaid'; badge = '—'; }
+    else if (val === 0)    { cls = IS_ADMIN ? 'arrears editable' : 'arrears'; badge = '0'; }
     else if (val < 40)     { cls = IS_ADMIN ? 'partial editable' : 'partial viewable'; badge = `¢${val} / 40`; }
-    else                   { cls = 'paid viewable'; badge = `¢${val}`; }
+    else                   { cls = IS_ADMIN ? 'paid editable' : 'paid viewable'; badge = `¢${val}`; }
 
     return `<div class="month-row ${cls}" data-month="${i}" data-staff="${staffIdx}">
       <span class="month-name">${MONTHS[i]}</span>
@@ -1858,23 +1854,6 @@ async function addMonth() {
   }
 }
 
-async function addGlicoPayment() {
-  const label  = document.getElementById('glicoLabel').value.trim();
-  const amount = parseInt(document.getElementById('glicoAmount').value);
-  const date   = document.getElementById('glicoDate').value;
-  const msg    = document.getElementById('glicoMsg');
-  if (!label)             { showAdminMsg(msg, 'Please enter a description.', '#ff8080'); return; }
-  if (!amount || amount <= 0) { showAdminMsg(msg, 'Please enter a valid amount.', '#ff8080'); return; }
-  if (!date)              { showAdminMsg(msg, 'Please select a date.', '#ff8080'); return; }
-  showAdminMsg(msg, 'Saving...', '#a0bedd');
-  const { error } = await db.from('glico_payments').insert({ period_id: PERIOD_ID, label, amount, paid_date: date });
-  if (error) { showAdminMsg(msg, 'Error: ' + error.message, '#ff8080'); return; }
-  GLICO_PAID.push({ label, amount });
-  showAdminMsg(msg, 'Payment recorded!', '#5fdb80');
-  document.getElementById('glicoLabel').value  = '';
-  document.getElementById('glicoAmount').value = '';
-  setupAdminPanel();
-}
 
 async function deactivateStaff() {
   const sel  = document.getElementById('deactivateStaff');
