@@ -2042,7 +2042,7 @@ async function loadLedger() {
     html += '</div>';
     html += '<div style="color:#a0bedd;font-size:11px;margin-bottom:8px">' + months + '</div>';
     if (txn.entries[0].note) html += '<div style="color:#7eb3e8;font-size:11px;font-style:italic;margin-bottom:8px">' + txn.entries[0].note + '</div>';
-    html += '<button onclick="voidTransaction(\"' + txnId + '\")" style="width:100%;padding:8px;background:#3a1a1a;border:1px solid #c0392b;border-radius:6px;color:#ff8080;font-size:12px;cursor:pointer;font-weight:600">&#x2715; Void This Transaction</button>';
+    html += '<button data-txn="' + txnId + '" onclick="voidTransaction(this.dataset.txn)" style="width:100%;padding:8px;background:#3a1a1a;border:1px solid #c0392b;border-radius:6px;color:#ff8080;font-size:12px;cursor:pointer;font-weight:600">&#x2715; Void This Transaction</button>';
     html += '</div>';
   });
 
