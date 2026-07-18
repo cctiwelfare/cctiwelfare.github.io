@@ -2089,14 +2089,22 @@ async function voidTransaction(txnId) {
 
   // Reverse each entry
   for (const e of entries) {
-    // Restore previous amount in payments table
-    await db.from('payments').upsert({
-      staff_id:   e.staff_id,
-      period_id:  PERIOD_ID,
-      month_idx:  e.month_idx,
-      amount:     e.previous_amount || 0,
-      updated_at: now
-    }, { onConflict: 'staff_id,period_id,month_idx' });
+    // Restore previous amount — if was 0 (new payment), delete the record
+    if (!e.previous_amount || e.previous_amount === 0) {
+      await db.from('payments')
+        .delete()
+        .eq('staff_id', e.staff_id)
+        .eq('period_id', PERIOD_ID)
+        .eq('month_idx', e.month_idx);
+    } else {
+      await db.from('payments').upsert({
+        staff_id:   e.staff_id,
+        period_id:  PERIOD_ID,
+        month_idx:  e.month_idx,
+        amount:     e.previous_amount,
+        updated_at: now
+      }, { onConflict: 'staff_id,period_id,month_idx' });
+    }
 
     // Mark history entry as voided
     await db.from('payment_history').update({
@@ -2107,7 +2115,7 @@ async function voidTransaction(txnId) {
 
     // Update local STAFF array
     const staffEntry = STAFF.find(s => s[4] === e.staff_id);
-    if (staffEntry) staffEntry[3][e.month_idx] = e.previous_amount || null;
+    if (staffEntry) staffEntry[3][e.month_idx] = (e.previous_amount && e.previous_amount > 0) ? e.previous_amount : null;
   }
 
   // Record void in history
