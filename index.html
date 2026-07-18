@@ -348,8 +348,8 @@ footer { color: #1e3d6b; font-size: 11px; text-align: center; padding: 16px; mar
 .save-btn { width: 100%; padding: 12px; background: #28a745; border: none; border-radius: 8px; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; }
 .save-btn:hover { background: #218838; }
 .save-note { font-size: 11px; color: #276c3a; text-align: center; margin-top: 6px; }
-.month-row.editable { cursor: pointer; }
-.month-row.editable:hover { filter: brightness(.95); }
+.month-row.editable, .month-row.viewable { cursor: pointer; }
+.month-row.editable:hover, .month-row.viewable:hover { filter: brightness(.95); }
 .month-input { width: 60px; padding: 2px 6px; border-radius: 6px; border: 2px solid #2e75b6; background: #fff; font-size: 13px; font-weight: 700; color: #276c3a; text-align: center; outline: none; }
 .edit-hint { font-size: 10px; color: #888; text-align: center; padding: 5px; background: #f5f8ff; border-top: 1px solid #dde; }
 </style>
@@ -582,6 +582,21 @@ footer { color: #1e3d6b; font-size: 11px; text-align: center; padding: 16px; mar
       <div id="editStaffMsg" style="margin-top:8px;font-size:12px;text-align:center;display:none"></div>
     </div>
 
+  </div>
+</div>
+
+<!-- Month History Modal -->
+<div id="monthHistoryModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:998;align-items:center;justify-content:center;padding:20px">
+  <div style="background:#162d55;border-radius:14px;width:100%;max-width:380px;box-shadow:0 8px 32px rgba(0,0,0,.6);overflow:hidden">
+    <div style="background:#1a3d6b;padding:14px 18px;display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div id="monthHistoryTitle" style="font-size:14px;font-weight:700;color:#fff"></div>
+        <div id="monthHistoryStaff" style="font-size:11px;color:#7eb3e8;margin-top:2px"></div>
+      </div>
+      <button onclick="document.getElementById('monthHistoryModal').style.display='none'" style="background:none;border:none;color:#7eb3e8;font-size:18px;cursor:pointer;padding:0">&#x2715;</button>
+    </div>
+    <div id="monthHistoryBody" style="padding:16px 18px;max-height:50vh;overflow-y:auto"></div>
+    <div id="monthHistoryAdminBar" style="display:none;padding:0 18px 16px"></div>
   </div>
 </div>
 
@@ -1180,10 +1195,11 @@ function showCard([num, name, dept, payments], staffIdx) {
   const monthsHTML = payments.map((val, i) => {
     let cls, badge;
     if (i < joinIdx)       { cls = 'pre-member'; badge = 'n/a'; }
-    else if (val === null) { cls = IS_ADMIN ? 'unpaid editable' : 'unpaid'; badge = '—'; }
-    else if (val === 0)    { cls = IS_ADMIN ? 'arrears editable' : 'arrears'; badge = '0'; }
-    else if (val < 40)     { cls = IS_ADMIN ? 'partial editable' : 'partial'; badge = `¢${val} / 40`; }
-    else                   { cls = 'paid'; badge = `¢${val}`; }
+    else if (val === null) { cls = IS_ADMIN ? 'unpaid editable' : 'unpaid viewable'; badge = '—'; }
+    else if (val === 0)    { cls = IS_ADMIN ? 'arrears editable' : 'arrears viewable'; badge = '0'; }
+    else if (val < 40)     { cls = IS_ADMIN ? 'partial editable' : 'partial viewable'; badge = `¢${val} / 40`; }
+    else                   { cls = 'paid viewable'; badge = `¢${val}`; }
+
     return `<div class="month-row ${cls}" data-month="${i}" data-staff="${staffIdx}">
       <span class="month-name">${MONTHS[i]}</span>
       <span class="month-badge">${badge}</span>
@@ -1232,32 +1248,98 @@ ${buildStatusBar(payments, joinIdx)}
   document.querySelectorAll('.month-row.editable').forEach(row => {
     row.addEventListener('click', () => startEdit(row));
   });
+  document.querySelectorAll('.month-row.viewable').forEach(row => {
+    row.addEventListener('click', () => startEdit(row));
+  });
   resultBox.classList.add('visible');
   resultBox.scrollIntoView({ behavior:'smooth', block:'nearest' });
 }
 
-function startEdit(row) {
-  // Lump sum entry: show the payment entry bar instead of inline edit
+async function startEdit(row) {
   const monthIdx = parseInt(row.dataset.month);
   const staffIdx = parseInt(row.dataset.staff);
+  const curVal   = STAFF[staffIdx][3][monthIdx];
+  const name     = STAFF[staffIdx][1];
+  const month    = MONTHS[monthIdx];
+
+  // Show month history modal
+  const modal = document.getElementById('monthHistoryModal');
+  document.getElementById('monthHistoryTitle').textContent = month + (curVal >= 40 ? ' — GH₵' + curVal + ' (fully paid)' : curVal > 0 ? ' — GH₵' + curVal + ' (partial)' : ' — Unpaid');
+  document.getElementById('monthHistoryStaff').textContent = name;
+
+  const body = document.getElementById('monthHistoryBody');
+  body.innerHTML = '<div style="color:#a0bedd;text-align:center;padding:8px">Loading history...</div>';
+  modal.style.display = 'flex';
+
+  // Fetch history for this staff + month
+  const { data: history } = await db.from('payment_history')
+    .select('*')
+    .eq('staff_id', STAFF[staffIdx][4])
+    .eq('period_id', PERIOD_ID)
+    .eq('month_idx', monthIdx)
+    .or('action.neq.import,received_date.not.is.null')
+    .order('created_at');
+
+  if (!history || history.length === 0) {
+    body.innerHTML = '<div style="color:#5b7fa3;text-align:center;padding:12px">No payment history recorded.</div>';
+  } else {
+    let html = '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+    html += '<tr style="color:#5b9bd5;font-size:10px;text-transform:uppercase">'
+      + '<th style="text-align:left;padding:5px 4px;border-bottom:1px solid #1e3d6b">Date</th>'
+      + '<th style="text-align:left;padding:5px 4px;border-bottom:1px solid #1e3d6b">Action</th>'
+      + '<th style="text-align:right;padding:5px 4px;border-bottom:1px solid #1e3d6b">Amount</th>'
+      + '<th style="text-align:left;padding:5px 4px;border-bottom:1px solid #1e3d6b">Note</th>'
+      + '</tr>';
+    history.forEach(h => {
+      const date   = h.received_date
+        ? new Date(h.received_date).toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'numeric'})
+        : new Date(h.created_at).toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'numeric'});
+      const action = h.action === 'import' ? '<span style="color:#7eb3e8">Payment</span>'
+        : h.action === 'topup' ? '<span style="color:#ffc107">Top-up</span>'
+        : '<span style="color:#5fdb80">Payment</span>';
+      const amt = h.action === 'topup'
+        ? '<span style="color:#ffc107">+GH₵'+h.amount_change+'</span>'
+        : '<span style="color:#5fdb80">GH₵'+h.amount_change+'</span>';
+      html += '<tr style="border-bottom:1px solid #0f2044">'
+        + '<td style="padding:5px 4px;color:#a0bedd">' + date + '</td>'
+        + '<td style="padding:5px 4px">' + action + '</td>'
+        + '<td style="padding:5px 4px;text-align:right">' + amt + '</td>'
+        + '<td style="padding:5px 4px;color:#7eb3e8;font-size:11px">' + (h.note || '') + '</td>'
+        + '</tr>';
+    });
+    const total = history.reduce((s,h) => s+h.amount_change, 0);
+    html += '<tr><td colspan="2" style="padding:6px 4px;font-weight:700;color:#fff">Total</td>'
+      + '<td style="padding:6px 4px;text-align:right;font-weight:700;color:#5fdb80">GH₵'+total+'</td><td></td></tr>';
+    html += '</table>';
+    body.innerHTML = html;
+  }
+
+  // Show payment entry for admin only
+  const adminBar = document.getElementById('monthHistoryAdminBar');
+  if (IS_ADMIN) {
+    adminBar.style.display = 'block';
+    adminBar.innerHTML = '<button onclick="openPaymentEntry('+monthIdx+','+staffIdx+')" style="width:100%;padding:11px;background:#28a745;border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:700;cursor:pointer">+ Enter Payment</button>';
+  } else {
+    adminBar.style.display = 'none';
+  }
+}
+
+function openPaymentEntry(monthIdx, staffIdx) {
+  document.getElementById('monthHistoryModal').style.display = 'none';
   _pendingStartMonth = monthIdx;
   _pendingStaffIdx   = staffIdx;
 
-  // Show payment bar
   const bar = document.getElementById('saveBar');
   bar.classList.add('visible');
 
-  // Set month hint
   const remaining = 40 - (STAFF[staffIdx][3][monthIdx] || 0);
   const monthHint = document.getElementById('monthHint');
   if (monthHint) monthHint.textContent = 'Starting from ' + MONTHS[monthIdx] + ' · max per month GH₵' + remaining + ' remaining';
 
-  // Prefill date and note
   const today = new Date().toISOString().slice(0,10);
   const drEl = document.getElementById('paymentDateReceived');
   if (drEl) { drEl.value = today; updateNoteFromDate(); }
 
-  // Clear amount
   const amtEl = document.getElementById('lumpAmount');
   if (amtEl) { amtEl.value = ''; amtEl.focus(); }
 }
