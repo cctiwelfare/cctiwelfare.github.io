@@ -1268,14 +1268,13 @@ async function startEdit(row) {
   modal.style.display = 'flex';
 
   // Fetch history for this staff + month
-  const { data: historyRaw } = await db.from('payment_history')
+  const { data: history } = await db.from('payment_history')
     .select('*')
     .eq('staff_id', STAFF[staffIdx][4])
     .eq('period_id', PERIOD_ID)
     .eq('month_idx', monthIdx)
+    .neq('action', 'import')
     .order('created_at');
-  // Show app entries always; show import entries only if they have a received_date
-  const history = (historyRaw || []).filter(h => h.action !== 'import' || h.received_date);
 
   if (!history || history.length === 0) {
     body.innerHTML = '<div style="color:#5b7fa3;text-align:center;padding:12px">No payment history recorded.</div>';
@@ -1291,7 +1290,7 @@ async function startEdit(row) {
       const date   = h.received_date
         ? new Date(h.received_date).toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'numeric'})
         : new Date(h.created_at).toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'numeric'});
-      const action = h.action === 'import' ? '<span style="color:#7eb3e8">Payment</span>'
+      const action = h.action === 'import' ? '<span style="color:#7eb3e8">Initial record</span>'
         : h.action === 'topup' ? '<span style="color:#ffc107">Top-up</span>'
         : '<span style="color:#5fdb80">Payment</span>';
       const amt = h.action === 'topup'
