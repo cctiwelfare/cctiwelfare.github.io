@@ -637,6 +637,9 @@ footer { color: #1e3d6b; font-size: 11px; text-align: center; padding: 16px; mar
   </div>
 </div>
 
+<!-- Toast notification -->
+<div id="toastNotif" style="display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1a3d6b;color:#fff;padding:12px 24px;border-radius:10px;font-size:13px;font-weight:600;box-shadow:0 4px 20px rgba(0,0,0,.5);z-index:9999;text-align:center;max-width:320px;border-left:4px solid #5fdb80"></div>
+
 <footer>CCTI Welfare Association &middot; 2025/2026</footer>
 
 <script>
@@ -1301,6 +1304,15 @@ let _pendingStartMonth = null;
 let _pendingStaffIdx   = null;
 
 // Track last edit for Supabase save
+// Toast notification
+function showToast(msg, color) {
+  const toast = document.getElementById('toastNotif');
+  toast.textContent = msg;
+  toast.style.borderLeftColor = color || '#5fdb80';
+  toast.style.display = 'block';
+  setTimeout(() => { toast.style.display = 'none'; }, 3500);
+}
+
 // Password confirmation modal
 let _passwordConfirmResolve = null;
 function requirePassword(message) {
@@ -2068,7 +2080,7 @@ async function voidTransaction(txnId) {
     .eq('period_id', PERIOD_ID);
 
   if (error || !entries || entries.length === 0) {
-    alert('Could not fetch transaction details.');
+    showToast('Could not fetch transaction details.', '#ff8080'); return;
     return;
   }
 
@@ -2116,7 +2128,7 @@ async function voidTransaction(txnId) {
   STAFF.forEach(([,,,p]) => p.forEach((v,i) => { if (v) MONTHLY_TOTALS[i] += v; }));
   TOTAL_COLLECTED = MONTHLY_TOTALS.reduce((a,b) => a+b, 0) + INACTIVE_TOTAL;
 
-  alert('Transaction voided successfully. Re-enter the correct amount.');
+  showToast('Transaction voided. Re-enter the correct amount.', '#5fdb80');
   loadLedger();
 
   // Refresh card if open
@@ -2250,7 +2262,8 @@ async function reactivateStaffMember() {
   const msg  = document.getElementById('reactivateMsg');
 
   if (!id) { showAdminMsg(msg, 'No inactive staff to reactivate.', '#ff8080'); return; }
-  if (!confirm('Reactivate ' + name + '? They will appear in the staff list again.')) return;
+  const reactOk = await showPayConfirm('<div style="color:#c8dcf5">Reactivate <strong>' + name + '</strong>?<br><span style="font-size:12px;color:#a0bedd">They will reappear in the staff list.</span></div>');
+  if (!reactOk) return;
 
   showAdminMsg(msg, 'Updating...', '#a0bedd');
   const { error } = await db.from('staff').update({ is_active: true }).eq('id', id);
