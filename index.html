@@ -692,7 +692,7 @@ async function loadData() {
 }
 
 // ── Save payment to Supabase ──────────────────────────────────
-async function savePaymentToDb(staffDbId, staffName, monthIdx, amount, note, dateReceived) {
+async function savePaymentToDb(staffDbId, staffName, monthIdx, amount, note, dateReceived, amountReceived) {
   const saveBar = document.getElementById('saveBar');
   const saveBtn = saveBar.querySelector('.save-btn');
   saveBtn.textContent = 'Saving...';
@@ -701,14 +701,15 @@ async function savePaymentToDb(staffDbId, staffName, monthIdx, amount, note, dat
   try {
     const { data: { user } } = await db.auth.getUser();
     const payload = {
-      staff_id:      staffDbId,
-      period_id:     PERIOD_ID,
-      month_idx:     monthIdx,
-      amount:        amount || 0,
-      note:          note || null,
-      received_date: dateReceived || null,
-      entered_by:    user ? user.email : null,
-      updated_at:    new Date().toISOString()
+      staff_id:        staffDbId,
+      period_id:       PERIOD_ID,
+      month_idx:       monthIdx,
+      amount:          amount || 0,
+      amount_received: amountReceived || amount || 0,
+      note:            note || null,
+      received_date:   dateReceived || null,
+      entered_by:      user ? user.email : null,
+      updated_at:      new Date().toISOString()
     };
     const { error } = await db.from('payments').upsert(payload, { onConflict: 'staff_id,period_id,month_idx' });
     if (error) throw error;
@@ -1099,15 +1100,21 @@ ${buildStatusBar(payments, joinIdx)}
         return '<div style="font-size:11px;color:#6a8ab5;text-align:center;padding:4px 0">Last payment: GH&#x20B5;' + info.amount.toLocaleString() + ' on ' + lastDate + '</div>';
       })()}
       <div class="save-bar" id="saveBar">
-        <div style="display:flex;gap:8px;margin-bottom:8px">
+        <div id="monthHint" style="font-size:11px;color:#276c3a;margin-bottom:8px;font-weight:600"></div>
+        <div style="display:flex;gap:8px;margin-bottom:8px;align-items:flex-end">
+          <div style="flex:1">
+            <label style="display:block;font-size:10px;color:#276c3a;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">Amount Received</label>
+            <input type="number" class="note-input" id="lumpAmount" placeholder="e.g. 200" min="1" style="margin-bottom:0">
+          </div>
           <div style="flex:1">
             <label style="display:block;font-size:10px;color:#276c3a;margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">Date Received</label>
             <input type="date" class="note-input" id="paymentDateReceived" style="margin-bottom:0" onchange="updateNoteFromDate()">
           </div>
         </div>
         <input type="text" class="note-input" id="paymentNote" placeholder="Note">
+        <div id="allocationPreview" style="font-size:11px;color:#276c3a;margin-bottom:8px;display:none"></div>
         <button class="save-btn" onclick="saveChanges()">Save Payment</button>
-        <div class="save-note">Saves directly to the database</div>
+        <div class="save-note">Amount will be distributed across months starting from selected month</div>
       </div>
       </div>
     </div>`;
@@ -1119,37 +1126,33 @@ ${buildStatusBar(payments, joinIdx)}
 }
 
 function startEdit(row) {
-  const monthIdx  = parseInt(row.dataset.month);
-  const staffIdx  = parseInt(row.dataset.staff);
-  const badgeSpan = row.querySelector('.month-badge');
-  const curVal    = STAFF[staffIdx][3][monthIdx] || 0;
-  const input = document.createElement('input');
-  input.type = 'number'; input.min = 0; input.max = 40;
-  input.className = 'month-input';
-  input.value = curVal > 0 ? curVal : '';
-  input.placeholder = '0–40';
-  badgeSpan.replaceWith(input);
-  input.focus(); input.select();
-  function commit() {
-    const newVal = parseInt(input.value);
-    const v = isNaN(newVal) ? null : (newVal === 0 ? null : newVal);
-    STAFF[staffIdx][3][monthIdx] = v;
-    if (!pendingEdits[staffIdx]) pendingEdits[staffIdx] = {};
-    pendingEdits[staffIdx][monthIdx] = v;
-    _lastEdit = { staffDbId: STAFF[staffIdx][4], staffName: STAFF[staffIdx][1], monthIdx, amount: v };
-    showCard(STAFF[staffIdx], staffIdx);
-    document.getElementById('saveBar').classList.add('visible');
-    // Prefill date received with today and auto-fill note
-    const today = new Date().toISOString().slice(0,10);
-    const drEl = document.getElementById('paymentDateReceived');
-    if (drEl) { drEl.value = today; updateNoteFromDate(); }
-  }
-  input.addEventListener('blur', commit);
-  input.addEventListener('keydown', e => {
-    if (e.key === 'Enter') input.blur();
-    if (e.key === 'Escape') input.replaceWith(badgeSpan);
-  });
+  // Lump sum entry: show the payment entry bar instead of inline edit
+  const monthIdx = parseInt(row.dataset.month);
+  const staffIdx = parseInt(row.dataset.staff);
+  _pendingStartMonth = monthIdx;
+  _pendingStaffIdx   = staffIdx;
+
+  // Show payment bar
+  const bar = document.getElementById('saveBar');
+  bar.classList.add('visible');
+
+  // Set month hint
+  const remaining = 40 - (STAFF[staffIdx][3][monthIdx] || 0);
+  const monthHint = document.getElementById('monthHint');
+  if (monthHint) monthHint.textContent = 'Starting from ' + MONTHS[monthIdx] + ' · max per month GH₵' + remaining + ' remaining';
+
+  // Prefill date and note
+  const today = new Date().toISOString().slice(0,10);
+  const drEl = document.getElementById('paymentDateReceived');
+  if (drEl) { drEl.value = today; updateNoteFromDate(); }
+
+  // Clear amount
+  const amtEl = document.getElementById('lumpAmount');
+  if (amtEl) { amtEl.value = ''; amtEl.focus(); }
 }
+
+let _pendingStartMonth = null;
+let _pendingStaffIdx   = null;
 
 // Track last edit for Supabase save
 function updateNoteFromDate() {
@@ -1166,11 +1169,101 @@ function updateNoteFromDate() {
   }
 }
 
-function saveChanges() {
-  if (!_lastEdit) return;
-  const note     = document.getElementById('paymentNote') ? document.getElementById('paymentNote').value : '';
-  const dateRcvd = document.getElementById('paymentDateReceived') ? document.getElementById('paymentDateReceived').value : '';
-  savePaymentToDb(_lastEdit.staffDbId, _lastEdit.staffName, _lastEdit.monthIdx, _lastEdit.amount, note, dateRcvd);
+async function saveChanges() {
+  if (_pendingStaffIdx === null || _pendingStartMonth === null) return;
+
+  const amtStr   = document.getElementById('lumpAmount').value;
+  const note     = document.getElementById('paymentNote').value || '';
+  const dateRcvd = document.getElementById('paymentDateReceived').value || '';
+  const lump     = parseInt(amtStr);
+
+  if (!lump || lump <= 0) { alert('Please enter a valid amount.'); return; }
+
+  const staffIdx = _pendingStaffIdx;
+  const payments = STAFF[staffIdx][3];
+  const joinIdx  = payments.findIndex(v => v !== null);
+
+  // Distribute lump sum across months starting from _pendingStartMonth
+  let remaining = lump;
+  const edits   = []; // { monthIdx, oldVal, newVal, received }
+
+  for (let m = _pendingStartMonth; m < MONTHS.length && remaining > 0; m++) {
+    if (m < joinIdx) continue; // pre-membership
+    const curVal  = payments[m] || 0;
+    const canAdd  = 40 - curVal;
+    if (canAdd <= 0) continue; // already full
+    const toAdd   = Math.min(remaining, canAdd);
+    edits.push({ monthIdx: m, oldVal: curVal, newVal: curVal + toAdd, received: toAdd });
+    remaining -= toAdd;
+  }
+
+  if (edits.length === 0) { alert('No months available to fill from ' + MONTHS[_pendingStartMonth]); return; }
+
+  // Build confirmation message
+  let msg = 'This will record the following payments:\n\n';
+  edits.forEach(e => {
+    const topup = e.oldVal > 0 ? ' (top-up from GH₵' + e.oldVal + ')' : '';
+    msg += MONTHS[e.monthIdx] + ': GH₵' + e.received + topup + '\n';
+  });
+  if (remaining > 0) msg += '\nNote: GH₵' + remaining + ' could not be applied (all months full).';
+  msg += '\n\nConfirm?';
+
+  if (!confirm(msg)) return;
+
+  // Save each edit
+  const saveBtn = document.querySelector('#saveBar .save-btn');
+  saveBtn.textContent = 'Saving...';
+  saveBtn.disabled = true;
+
+  try {
+    for (const e of edits) {
+      // Fetch existing note to append
+      const { data: existing } = await db.from('payments')
+        .select('note')
+        .eq('staff_id', STAFF[staffIdx][4])
+        .eq('period_id', PERIOD_ID)
+        .eq('month_idx', e.monthIdx)
+        .maybeSingle();
+
+      const existingNote = existing && existing.note ? existing.note : '';
+      const today = new Date().toLocaleDateString('en-GB', {day:'2-digit',month:'2-digit',year:'numeric'});
+      const topupNote = e.oldVal > 0 ? ' (top-up +' + e.received + ')' : '';
+      const newNote = existingNote
+        ? existingNote + '\n' + today + ': ' + note + topupNote
+        : (note ? today + ': ' + note + topupNote : null);
+
+      await savePaymentToDb(
+        STAFF[staffIdx][4], STAFF[staffIdx][1],
+        e.monthIdx, e.newVal, newNote, dateRcvd, e.received
+      );
+
+      // Update local STAFF array
+      STAFF[staffIdx][3][e.monthIdx] = e.newVal;
+    }
+
+    saveBtn.textContent = 'Saved!';
+    saveBtn.style.background = '#155724';
+    setTimeout(() => {
+      saveBtn.textContent = 'Save Payment';
+      saveBtn.style.background = '';
+      saveBtn.disabled = false;
+    }, 2000);
+
+    // Recalculate totals
+    MONTHLY_TOTALS = new Array(MONTHS.length).fill(0);
+    STAFF.forEach(([,,,p]) => p.forEach((v,i) => { if (v) MONTHLY_TOTALS[i] += v; }));
+    TOTAL_COLLECTED = MONTHLY_TOTALS.reduce((a,b) => a+b, 0) + INACTIVE_TOTAL;
+
+    // Refresh card
+    showCard(STAFF[staffIdx], staffIdx);
+    document.getElementById('lumpAmount').value = '';
+
+  } catch(err) {
+    saveBtn.textContent = 'Failed - retry';
+    saveBtn.disabled = false;
+    console.error(err);
+    alert('Save failed: ' + err.message);
+  }
 }
 
 
@@ -1536,13 +1629,10 @@ async function downloadDailyReport() {
   showAdminMsg(msg, 'Generating...', '#a0bedd');
 
   // Fetch payments updated on this date
-  const dateStart = date + 'T00:00:00.000Z';
-  const dateEnd   = date + 'T23:59:59.999Z';
   const { data: payments, error } = await db.from('payments')
     .select('*, staff(name, department)')
     .eq('period_id', PERIOD_ID)
-    .gte('updated_at', dateStart)
-    .lte('updated_at', dateEnd)
+    .eq('received_date', date)
     .gt('amount', 0)
     .order('updated_at');
 
@@ -1561,13 +1651,14 @@ async function downloadDailyReport() {
   const totalGlico = (glicoData || []).reduce((s,g) => s + g.amount, 0);
 
   // Get previous total (all payments before this date)
+  // Previous total = all payments with received_date before selected date
   const { data: prevPayments } = await db.from('payments')
-    .select('amount')
+    .select('amount_received, amount')
     .eq('period_id', PERIOD_ID)
-    .lt('updated_at', dateStart)
+    .lt('received_date', date)
     .gt('amount', 0);
-  const prevTotal = (prevPayments || []).reduce((s,p) => s + p.amount, 0);
-  const newTotal  = prevTotal + payments.reduce((s,p) => s + p.amount, 0);
+  const prevTotal = (prevPayments || []).reduce((s,p) => s + (p.amount_received || p.amount), 0) + INACTIVE_TOTAL;
+  const newTotal  = prevTotal + payments.reduce((s,p) => s + (p.amount_received || p.amount), 0);
 
   // Build txt content matching your format
   let lines = [];
@@ -1582,11 +1673,13 @@ async function downloadDailyReport() {
 
   let dayTotal = 0;
   payments.forEach(p => {
-    const name = p.staff ? p.staff.name : 'Unknown';
-    const dept = p.staff ? p.staff.department : '';
-    const note = p.note ? ' (' + p.note + ')' : '';
-    lines.push(name + ' (' + dept + ') - ' + p.amount + note + ' (' + dateLabel + ')');
-    dayTotal += p.amount;
+    const name     = p.staff ? p.staff.name : 'Unknown';
+    const dept     = p.staff ? p.staff.department : '';
+    const month    = MONTHS[p.month_idx] || ('Month ' + p.month_idx);
+    const received = p.amount_received || p.amount;
+    const topup    = (p.amount - received) > 0 ? ' (top-up +' + received + ', total ' + p.amount + ')' : '';
+    lines.push(name + ' (' + dept + ') - ' + month + ': GH₵' + received + topup + ' (' + dateLabel + ')');
+    dayTotal += received;
   });
 
   lines.push('');
