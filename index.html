@@ -1211,7 +1211,7 @@ function buildStatusBar(payments, joinIdx) {
   const behindTotal  = payments.slice(joinIdx, DUE_MONTHS)
     .reduce((s, v) => v === null || v < 40 ? s + (40 - (v || 0)) : s, 0);
 
-  const currentMonth = MONTHS[CURRENT_IDX].replace(/\'(\d{2})$/, (_, y) => ' 20' + y);
+  const currentMonth = MONTHS[CURRENT_IDX].replace(/\s*\'(\d{2})$/, (_, y) => ' 20' + y);
   if (behind === 0 && paidAhead > 0) {
     return '<div class="status-bar ahead"><strong>' + paidAhead + ' month' + (paidAhead>1?'s':'') + ' paid in advance beyond ' + currentMonth + ': GH&#x20B5;' + aheadTotal.toLocaleString() + '</strong></div>';
   } else if (behind === 0) {
@@ -2239,7 +2239,7 @@ async function sendPaymentSMS(staffIdx, amountReceived, dateRcvd) {
   const behind = payments.slice(joinIdx, DUE_MONTHS).filter(v => v === null || v < 40).length;
   const paidAhead = payments.slice(DUE_MONTHS).filter(v => v !== null && v > 0).length;
   const aheadTotal = payments.slice(DUE_MONTHS).reduce((s, v) => s + (v || 0), 0);
-  const currentMonth = MONTHS[CURRENT_IDX].replace(/\'(\d{2})$/, (_, y) => ' 20' + y);
+  const currentMonth = MONTHS[CURRENT_IDX].replace(/\s*\'(\d{2})$/, (_, y) => ' 20' + y);
 
   // Format date received
   const dateStr = dateRcvd
@@ -2249,7 +2249,11 @@ async function sendPaymentSMS(staffIdx, amountReceived, dateRcvd) {
   // Build message based on status
   let statusLine = '';
   if (behindTotal === 0 && paidAhead > 0) {
-    statusLine = 'Paid up to ' + currentMonth + '. ' + paidAhead + ' month' + (paidAhead>1?'s':'') + ' in advance: GHS' + aheadTotal + '.';
+    // Find the last month that has a payment
+    let lastPaidIdx = payments.length - 1;
+    while (lastPaidIdx >= 0 && (!payments[lastPaidIdx] || payments[lastPaidIdx] === 0)) lastPaidIdx--;
+    const lastPaidMonth = lastPaidIdx >= 0 ? MONTHS[lastPaidIdx].replace(/\s*'(\d{2})$/, (_, y) => ' 20' + y) : currentMonth;
+    statusLine = 'Paid up to ' + lastPaidMonth + '. ' + paidAhead + ' month' + (paidAhead>1?'s':'') + ' in advance: GHS' + aheadTotal + '.';
   } else if (behindTotal === 0) {
     statusLine = 'Paid up to ' + currentMonth + '.';
   } else if (amountReceived > 0 && behind > 0) {
@@ -2258,7 +2262,7 @@ async function sendPaymentSMS(staffIdx, amountReceived, dateRcvd) {
     statusLine = 'You owe ' + behind + ' month' + (behind>1?'s':'') + ' up to ' + currentMonth + ': GHS' + behindTotal + '.';
   }
 
-  const message = 'Dear ' + name + ', GHS' + amountReceived + ' received on ' + dateStr + '. ' + statusLine + ' Total paid: GHS' + total + '. -CCTI Staff Welfare';
+  const message = 'Dear ' + name + ', GHS' + amountReceived + ' received on ' + dateStr + '. ' + statusLine + ' Total paid: GHS' + total + '.';
 
   // Format phone number to international format
   let phoneNum = phone.replace(/\s/g, '');
