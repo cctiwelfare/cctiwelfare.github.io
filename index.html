@@ -567,6 +567,25 @@ footer { color: #1e3d6b; font-size: 11px; text-align: center; padding: 16px; mar
       <div id="auditLogResults" style="font-size:12px;max-height:400px;overflow-y:auto"></div>
     </div>
 
+    <!-- Arrears SMS Reminders -->
+    <div class="section-head">Send Arrears Reminders</div>
+    <div style="background:#162d55;border-radius:12px;padding:16px;margin-bottom:16px">
+      <div style="color:#a0bedd;font-size:12px;margin-bottom:12px">Send SMS reminders to all staff owing 2 or more months. Only staff with phone numbers stored will receive messages.</div>
+      <div style="margin-bottom:14px">
+        <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">Minimum Months Owing</label>
+        <select id="reminderMinMonths" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:14px;outline:none">
+          <option value="2">2 months and above</option>
+          <option value="3">3 months and above</option>
+          <option value="4">4 months and above</option>
+          <option value="5">5 months and above</option>
+        </select>
+      </div>
+      <div id="reminderPreview" style="margin-bottom:12px;font-size:12px;color:#a0bedd"></div>
+      <button onclick="previewArrearsSMS()" style="width:100%;padding:11px;background:#1a4b8c;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:8px">Preview Recipients</button>
+      <button onclick="sendArrearsSMS()" id="sendRemindersBtn" style="width:100%;padding:11px;background:#c0392b;border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:700;cursor:pointer;display:none">Send Reminders</button>
+      <div id="reminderMsg" style="margin-top:8px;font-size:12px;text-align:center;display:none"></div>
+    </div>
+
     <!-- Arrears List Export -->
     <div class="section-head">Export Arrears List</div>
     <div style="background:#162d55;border-radius:12px;padding:16px;margin-bottom:16px">
@@ -2298,6 +2317,109 @@ async function sendPaymentSMS(staffIdx, amountReceived, dateRcvd) {
   } catch(e) {
     console.error('SMS failed:', e);
   }
+}
+
+// ── Arrears SMS Reminders ────────────────────────────────────
+function getArrearsStaff(minMonths) {
+  const results = [];
+  STAFF.forEach((s, staffIdx) => {
+    const [num, name, dept, payments] = s;
+    const staffId = s[4];
+    const staffRow = (window._allStaffRows || []).find(r => r.id === staffId);
+    const phone = staffRow ? staffRow.phone : null;
+    const joinIdx = payments.findIndex(v => v !== null);
+    const behind = payments.slice(joinIdx, DUE_MONTHS).filter(v => v === null || v < 40).length;
+    const behindTotal = payments.slice(joinIdx, DUE_MONTHS)
+      .reduce((sum, v) => v === null || v < 40 ? sum + (40 - (v || 0)) : sum, 0);
+    if (behind >= minMonths) {
+      results.push({ staffIdx, name, dept, phone, behind, behindTotal });
+    }
+  });
+  return results.sort((a, b) => b.behindTotal - a.behindTotal);
+}
+
+function previewArrearsSMS() {
+  const minMonths = parseInt(document.getElementById('reminderMinMonths').value);
+  const staff = getArrearsStaff(minMonths);
+  const withPhone = staff.filter(s => s.phone);
+  const noPhone   = staff.filter(s => !s.phone);
+  const previewEl = document.getElementById('reminderPreview');
+  const sendBtn   = document.getElementById('sendRemindersBtn');
+
+  let html = '<div style="background:#0f2044;border-radius:8px;padding:10px;margin-bottom:8px">';
+  html += '<div style="color:#5fdb80;margin-bottom:6px;font-weight:700">' + withPhone.length + ' staff will receive SMS:</div>';
+  withPhone.slice(0, 10).forEach(s => {
+    html += '<div style="color:#c8dcf5;padding:2px 0">' + s.name + ' (' + s.dept + ') — '
+      + s.behind + ' month' + (s.behind>1?'s':'') + ' — GHS' + s.behindTotal + '</div>';
+  });
+  if (withPhone.length > 10) html += '<div style="color:#7eb3e8">...and ' + (withPhone.length-10) + ' more</div>';
+  html += '</div>';
+
+  if (noPhone.length > 0) {
+    html += '<div style="color:#ff8080;font-size:11px">' + noPhone.length + ' staff have no phone number stored and will be skipped.</div>';
+  }
+
+  previewEl.innerHTML = html;
+  sendBtn.style.display = withPhone.length > 0 ? 'block' : 'none';
+}
+
+async function sendArrearsSMS() {
+  const minMonths = parseInt(document.getElementById('reminderMinMonths').value);
+  const staff = getArrearsStaff(minMonths).filter(s => s.phone);
+  const msg   = document.getElementById('reminderMsg');
+  const btn   = document.getElementById('sendRemindersBtn');
+
+  if (staff.length === 0) { showAdminMsg(msg, 'No staff to remind.', '#ff8080'); return; }
+
+  const confirmed = await showPayConfirm(
+    '<div style="color:#c8dcf5;margin-bottom:8px">Send arrears reminders to <strong>' + staff.length + ' staff</strong>?</div>'
+    + '<div style="color:#ffc107;font-size:12px">This will send ' + staff.length + ' SMS messages via Moolre.</div>'
+  );
+  if (!confirmed) return;
+
+  btn.textContent = 'Sending...';
+  btn.disabled = true;
+  let sent = 0, failed = 0;
+
+  const currentMonth = MONTHS[CURRENT_IDX].replace(/\s*'(\d{2})$/, (_, y) => ' 20' + y);
+
+  for (const s of staff) {
+    const firstName = s.name.split(' ')[0];
+    const hasPartial = window._STAFF_PAYMENTS && window._STAFF_PAYMENTS[s.staffIdx]
+      ? false : false; // simplified for reminders
+    const hasPartialArrears = STAFF[s.staffIdx][3].slice(
+      STAFF[s.staffIdx][3].findIndex(v => v !== null), DUE_MONTHS
+    ).some(v => v !== null && v > 0 && v < 40);
+    const partialLabel = s.behind === 1 && hasPartialArrears ? ' (partial)'
+      : s.behind > 1 && hasPartialArrears ? ' (1 partial)' : '';
+
+    const message = 'Dear ' + firstName + ', you owe ' + s.behind + ' month'
+      + (s.behind>1?'s':'') + ' up to ' + currentMonth + partialLabel
+      + ': GHS' + s.behindTotal + '. Please pay as soon as possible. Total paid: GHS'
+      + STAFF[s.staffIdx][3].reduce((sum, v) => sum + (v||0), 0) + '.';
+
+    let phoneNum = s.phone.replace(/\s/g, '');
+    if (phoneNum.startsWith('0')) phoneNum = '233' + phoneNum.slice(1);
+    if (!phoneNum.startsWith('233')) phoneNum = '233' + phoneNum;
+
+    try {
+      const resp = await fetch('https://api.moolre.com/open/sms/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-API-VASKEY': MOOLRE_API_KEY },
+        body: JSON.stringify({ type: 1, senderid: MOOLRE_SENDER,
+          messages: [{ recipient: phoneNum, message }] })
+      });
+      const data = await resp.json();
+      if (data.status === 1) sent++; else failed++;
+    } catch(e) { failed++; }
+
+    // Small delay to avoid rate limiting
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  btn.textContent = 'Send Reminders';
+  btn.disabled = false;
+  showAdminMsg(msg, sent + ' reminders sent' + (failed>0?' (' + failed + ' failed)':'') + '.', sent>0?'#5fdb80':'#ff8080');
 }
 
 // ── Arrears Export ───────────────────────────────────────────
