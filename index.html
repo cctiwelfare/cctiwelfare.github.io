@@ -1257,19 +1257,27 @@ function buildStatusBar(payments, joinIdx) {
 function showCard([num, name, dept, payments], staffIdx) {
   const joinIdx = payments.findIndex(v => v !== null);
   const joinNote = joinIdx > 0 ? ` · Joined ${MONTHS[joinIdx]}` : '';
-  const monthsHTML = payments.map((val, i) => {
+  const monthsHTML = (() => {
+    // Find oldest unpaid/partial month - only this is editable for admin
+    let firstUnpaidIdx = -1;
+    for (let i = joinIdx; i < payments.length; i++) {
+      if (payments[i] === null || payments[i] === undefined || payments[i] < 40) {
+        firstUnpaidIdx = i; break;
+      }
+    }
+    return payments.map((val, i) => {
     let cls, badge;
     if (i < joinIdx)       { cls = 'pre-member'; badge = 'n/a'; }
-    else if (val === null) { cls = IS_ADMIN ? 'unpaid editable' : 'unpaid'; badge = '—'; }
-    else if (val === 0)    { cls = IS_ADMIN ? 'arrears editable' : 'arrears'; badge = '0'; }
-    else if (val < 40)     { cls = IS_ADMIN ? 'partial editable' : 'partial'; badge = `¢${val} / 40`; }
-    else                   { cls = IS_ADMIN ? 'paid editable' : 'paid'; badge = `¢${val}`; }
+    else if (val === null) { cls = (IS_ADMIN && i === firstUnpaidIdx) ? 'unpaid editable' : 'unpaid'; badge = '—'; }
+    else if (val === 0)    { cls = (IS_ADMIN && i === firstUnpaidIdx) ? 'arrears editable' : 'arrears'; badge = '0'; }
+    else if (val < 40)     { cls = (IS_ADMIN && i === firstUnpaidIdx) ? 'partial editable' : 'partial'; badge = `¢${val} / 40`; }
+    else                   { cls = 'paid'; badge = `¢${val}`; }
 
     return `<div class="month-row ${cls}" data-month="${i}" data-staff="${staffIdx}">
       <span class="month-name">${MONTHS[i]}</span>
       <span class="month-badge">${badge}</span>
     </div>`;
-  }).join('');
+  });}).join('');
   const total = payments.reduce((s,v) => s+(v||0), 0);
   resultBox.innerHTML = `
     <div class="card">
