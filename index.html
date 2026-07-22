@@ -1952,7 +1952,7 @@ async function downloadDailyReport() {
 
   showAdminMsg(msg, 'Generating...', '#a0bedd');
 
-  // Fetch payment_history grouped by transaction for date range
+  // Fetch payment_history for date range
   const { data: historyRows, error } = await db.from('payment_history')
     .select('*, staff(name, department)')
     .eq('period_id', PERIOD_ID)
@@ -1961,51 +1961,15 @@ async function downloadDailyReport() {
     .gte('received_date', dateFrom)
     .lte('received_date', dateTo)
     .order('created_at');
-  const payments = historyRows;
 
   if (error) { showAdminMsg(msg, 'Error: ' + error.message, '#ff8080'); return; }
-  if (!payments || payments.length === 0) {
+  if (!historyRows || historyRows.length === 0) {
     showAdminMsg(msg, 'No payments found for selected period.', '#ff8080'); return;
   }
-  showAdminMsg(msg, payments.length + ' records found...', '#a0bedd');
-
-  // Format dates as DD/MM/YYYY
-  const [yf, mf, df] = dateFrom.split('-');
-  const [yt, mt, dt] = dateTo.split('-');
-  const dateLabelFrom = df + '/' + mf + '/' + yf;
-  const dateLabelTo   = dt + '/' + mt + '/' + yt;
-  const dateLabel     = dateFrom === dateTo ? dateLabelFrom : dateLabelFrom + ' – ' + dateLabelTo;
-  const singleDay     = dateFrom === dateTo;
-
-  // Calculate running balance
-  const { data: glicoData } = await db.from('glico_payments').select('amount').eq('period_id', PERIOD_ID);
-  const totalGlico = (glicoData || []).reduce((s,g) => s + g.amount, 0);
-
-  // Get previous total (all payments before this date)
-  // Calculate opening balance automatically
-  const baseBalance     = parseFloat((window._settings && window._settings['base_balance']) || '0');
-  const baseBalanceDate = (window._settings && window._settings['base_balance_date']) || '2026-07-18';
-
-  // Sum all received payments from base date up to (not including) dateFrom
-  let prevTotal = baseBalance;
-  if (dateFrom > baseBalanceDate) {
-    const { data: prevPayments } = await db.from('payments')
-      .select('amount_received, amount')
-      .eq('period_id', PERIOD_ID)
-      .gte('received_date', baseBalanceDate)
-      .lt('received_date', dateFrom)
-      .gt('amount', 0);
-    prevTotal += (prevPayments || []).reduce((s,p) => s + (p.amount_received || p.amount), 0);
-  }
-
-  // Update the opening balance field to show calculated value
-  const openingBalanceEl = document.getElementById('reportOpeningBalance');
-  if (openingBalanceEl) openingBalanceEl.value = prevTotal;
-
 
   // Group by transaction_id
   const txnMap = {};
-  payments.forEach(p => {
+  historyRows.forEach(p => {
     const key = p.transaction_id || p.id;
     if (!txnMap[key]) txnMap[key] = {
       name: p.staff ? p.staff.name : 'Unknown',
@@ -2020,33 +1984,37 @@ async function downloadDailyReport() {
   // Sort transactions by created_at
   const txns = Object.values(txnMap).sort((a,b) => a.created_at > b.created_at ? 1 : -1);
 
-  txns.forEach(txn => {
-    const total  = txn.entries.reduce((s,e) => s + e.amount_change, 0);
-    const pDate  = txn.received_date ? txn.received_date.split('-').reverse().join('/') : dateLabelFrom;
-    const dateStr = singleDay ? '(' + dateLabelFrom + ')' : '(' + pDate + ')';
-    lines.push(txn.name + ' (' + txn.dept + ') - GH₵' + total + ' ' + dateStr);
-    txn.entries.forEach(e => {
-      const month  = MONTHS[e.month_idx] || ('Month ' + e.month_idx);
-      const topup  = e.action === 'topup' ? ' (top-up)' : '';
-      lines.push('  ' + month + ': GH₵' + e.amount_change + topup);
-    });
+  // Calculate day total
+  const dayTotal = txns.reduce((s, txn) =>
+    s + txn.entries.reduce((s2, e) => s2 + e.amount_change, 0), 0);
 
-  });
+  // Format dates
+  const [yf, mf, df] = dateFrom.split('-');
+  const [yt, mt, dt] = dateTo.split('-');
+  const dateLabelFrom = df + '/' + mf + '/' + yf;
+  const dateLabelTo   = dt + '/' + mt + '/' + yt;
+  const dateLabel     = dateFrom === dateTo ? dateLabelFrom : dateLabelFrom + ' – ' + dateLabelTo;
+  const singleDay     = dateFrom === dateTo;
 
-  lines.push('');
-  lines.push('Total - GH₵' + dayTotal.toLocaleString('en-GH', {minimumFractionDigits:2}));
-  lines.push('');
-  lines.push('This changes the overall total from GH₵' + prevTotal.toLocaleString('en-GH', {minimumFractionDigits:2}) + ' to GH₵' + newTotal.toLocaleString('en-GH', {minimumFractionDigits:2}));
-  lines.push('');
-  lines.push('Balance c/d - GH₵' + newTotal.toLocaleString('en-GH', {minimumFractionDigits:2}));
+  // Calculate opening balance
+  const baseBalance     = parseFloat((window._settings && window._settings['base_balance']) || '0');
+  const baseBalanceDate = (window._settings && window._settings['base_balance_date']) || '2026-07-18';
+  let prevTotal = baseBalance;
+  if (dateFrom > baseBalanceDate) {
+    const { data: prevPayments } = await db.from('payments')
+      .select('amount_received, amount')
+      .eq('period_id', PERIOD_ID)
+      .gte('received_date', baseBalanceDate)
+      .lt('received_date', dateFrom)
+      .gt('amount', 0);
+    prevTotal += (prevPayments || []).reduce((s,p) => s + (p.amount_received || p.amount), 0);
+  }
+  const openingBalanceEl = document.getElementById('reportOpeningBalance');
+  if (openingBalanceEl) openingBalanceEl.value = prevTotal;
 
+  const newTotal = prevTotal + dayTotal;
 
-  let dayTotal = 0;
-  txns.forEach(txn => { dayTotal += txn.entries.reduce((s,e) => s + e.amount_change, 0); });
-  const dayTotal2 = dayTotal;
-  const newTotal  = prevTotal + dayTotal2;
-
-  // Build txt content matching your format
+  // Build txt content
   let lines = [];
   lines.push('CCTI Staff Welfare Association');
   lines.push('Glico/Welfare Contributions');
@@ -2058,16 +2026,35 @@ async function downloadDailyReport() {
   lines.push('New Payments:');
   lines.push('');
 
+  txns.forEach(txn => {
+    const total   = txn.entries.reduce((s,e) => s + e.amount_change, 0);
+    const pDate   = txn.received_date ? txn.received_date.split('-').reverse().join('/') : dateLabelFrom;
+    const dateStr = singleDay ? '(' + dateLabelFrom + ')' : '(' + pDate + ')';
+    lines.push(txn.name + ' (' + txn.dept + ') - GH₵' + total + ' ' + dateStr);
+    txn.entries.forEach(e => {
+      const month = MONTHS[e.month_idx] || ('Month ' + e.month_idx);
+      const topup = e.action === 'topup' ? ' (top-up)' : '';
+      lines.push('  ' + month + ': GH₵' + e.amount_change + topup);
+    });
+  });
+
+  lines.push('');
+  lines.push('Total - GH₵' + dayTotal.toLocaleString('en-GH', {minimumFractionDigits:2}));
+  lines.push('');
+  lines.push('This changes the overall total from GH₵' + prevTotal.toLocaleString('en-GH', {minimumFractionDigits:2}) + ' to GH₵' + newTotal.toLocaleString('en-GH', {minimumFractionDigits:2}));
+  lines.push('');
+  lines.push('Balance c/d - GH₵' + newTotal.toLocaleString('en-GH', {minimumFractionDigits:2}));
+
   const blob = new Blob([lines.join('\n')], {type: 'text/plain;charset=utf-8'});
   const a    = document.createElement('a');
   a.href     = URL.createObjectURL(blob);
   a.download = 'Glico_Payments_Update_' + df + '_' + mf + '_' + yf + (dateFrom !== dateTo ? '_to_' + dt + '_' + mt + '_' + yt : '') + '.txt';
   a.click();
 
-  showAdminMsg(msg, payments.length + ' payments exported.', '#5fdb80');
+  showAdminMsg(msg, txns.length + ' transactions exported.', '#5fdb80');
 }
 
-// ── Payment Ledger ───────────────────────────────────────────
+
 async function loadLedger() {
   // Require password confirmation to access ledger
   const confirmed = await requirePassword('Re-enter your password to access the Payment Ledger.');
