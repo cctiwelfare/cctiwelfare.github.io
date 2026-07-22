@@ -2001,7 +2001,7 @@ async function downloadDailyReport() {
   const openingBalanceEl = document.getElementById('reportOpeningBalance');
   if (openingBalanceEl) openingBalanceEl.value = prevTotal;
 
-  const dayTotal2 = payments.reduce((s,p) => s + (p.amount_received || p.amount), 0);
+  const dayTotal2 = dayTotal; // already accumulated in txn loop
   const newTotal  = prevTotal + dayTotal2;
 
   // Build txt content matching your format
