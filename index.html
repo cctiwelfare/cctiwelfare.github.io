@@ -2002,22 +2002,6 @@ async function downloadDailyReport() {
   const openingBalanceEl = document.getElementById('reportOpeningBalance');
   if (openingBalanceEl) openingBalanceEl.value = prevTotal;
 
-  let dayTotal = 0;
-  txns.forEach(txn => { dayTotal += txn.entries.reduce((s,e) => s + e.amount_change, 0); });
-  const dayTotal2 = dayTotal;
-  const newTotal  = prevTotal + dayTotal2;
-
-  // Build txt content matching your format
-  let lines = [];
-  lines.push('CCTI Staff Welfare Association');
-  lines.push('Glico/Welfare Contributions');
-  lines.push('Payments Update ' + dateLabel);
-  if (!singleDay) lines.push('Period: ' + dateLabelFrom + ' to ' + dateLabelTo);
-  lines.push('');
-  lines.push('Balance b/f - GH₵' + prevTotal.toLocaleString('en-GH', {minimumFractionDigits:2}));
-  lines.push('');
-  lines.push('New Payments:');
-  lines.push('');
 
   // Group by transaction_id
   const txnMap = {};
@@ -2055,6 +2039,24 @@ async function downloadDailyReport() {
   lines.push('This changes the overall total from GH₵' + prevTotal.toLocaleString('en-GH', {minimumFractionDigits:2}) + ' to GH₵' + newTotal.toLocaleString('en-GH', {minimumFractionDigits:2}));
   lines.push('');
   lines.push('Balance c/d - GH₵' + newTotal.toLocaleString('en-GH', {minimumFractionDigits:2}));
+
+
+  let dayTotal = 0;
+  txns.forEach(txn => { dayTotal += txn.entries.reduce((s,e) => s + e.amount_change, 0); });
+  const dayTotal2 = dayTotal;
+  const newTotal  = prevTotal + dayTotal2;
+
+  // Build txt content matching your format
+  let lines = [];
+  lines.push('CCTI Staff Welfare Association');
+  lines.push('Glico/Welfare Contributions');
+  lines.push('Payments Update ' + dateLabel);
+  if (!singleDay) lines.push('Period: ' + dateLabelFrom + ' to ' + dateLabelTo);
+  lines.push('');
+  lines.push('Balance b/f - GH₵' + prevTotal.toLocaleString('en-GH', {minimumFractionDigits:2}));
+  lines.push('');
+  lines.push('New Payments:');
+  lines.push('');
 
   const blob = new Blob([lines.join('\n')], {type: 'text/plain;charset=utf-8'});
   const a    = document.createElement('a');
