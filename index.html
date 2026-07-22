@@ -2002,7 +2002,9 @@ async function downloadDailyReport() {
   const openingBalanceEl = document.getElementById('reportOpeningBalance');
   if (openingBalanceEl) openingBalanceEl.value = prevTotal;
 
-  const dayTotal2 = dayTotal; // already accumulated in txn loop
+  let dayTotal = 0;
+  txns.forEach(txn => { dayTotal += txn.entries.reduce((s,e) => s + e.amount_change, 0); });
+  const dayTotal2 = dayTotal;
   const newTotal  = prevTotal + dayTotal2;
 
   // Build txt content matching your format
@@ -2017,7 +2019,6 @@ async function downloadDailyReport() {
   lines.push('New Payments:');
   lines.push('');
 
-  let dayTotal = 0;
   // Group by transaction_id
   const txnMap = {};
   payments.forEach(p => {
@@ -2045,7 +2046,7 @@ async function downloadDailyReport() {
       const topup  = e.action === 'topup' ? ' (top-up)' : '';
       lines.push('  ' + month + ': GH₵' + e.amount_change + topup);
     });
-    dayTotal += total;
+
   });
 
   lines.push('');
