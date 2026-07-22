@@ -867,12 +867,22 @@ async function savePaymentToDb(staffDbId, staffName, monthIdx, amount, note, dat
 
   try {
     const { data: { user } } = await db.auth.getUser();
+    // Fetch existing amount_received to accumulate (not overwrite) on top-ups
+    const { data: existingPmt } = await db.from('payments')
+      .select('amount_received')
+      .eq('staff_id', staffDbId)
+      .eq('period_id', PERIOD_ID)
+      .eq('month_idx', monthIdx)
+      .maybeSingle();
+    const prevReceived = existingPmt ? (existingPmt.amount_received || 0) : 0;
+    const newReceived  = prevReceived + (amountReceived || amount || 0);
+
     const payload = {
       staff_id:        staffDbId,
       period_id:       PERIOD_ID,
       month_idx:       monthIdx,
       amount:          amount || 0,
-      amount_received: amountReceived || amount || 0,
+      amount_received: newReceived,
       note:            note || null,
       received_date:   dateReceived || null,
       entered_by:      user ? user.email : null,
