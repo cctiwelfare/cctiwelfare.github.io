@@ -2026,7 +2026,7 @@ async function downloadDailyReport() {
   lines.push('New Payments:');
   lines.push('');
 
-  txns.forEach(txn => {
+  txns.forEach((txn, ti) => {
     const total   = txn.entries.reduce((s,e) => s + e.amount_change, 0);
     const pDate   = txn.received_date ? txn.received_date.split('-').reverse().join('/') : dateLabelFrom;
     const dateStr = singleDay ? '(' + dateLabelFrom + ')' : '(' + pDate + ')';
@@ -2036,6 +2036,7 @@ async function downloadDailyReport() {
       const topup = e.action === 'topup' ? ' (top-up)' : '';
       lines.push('  ' + month + ': GH₵' + e.amount_change + topup);
     });
+    lines.push(''); // blank line between transactions
   });
 
   lines.push('');
