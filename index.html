@@ -1956,7 +1956,7 @@ async function downloadDailyReport() {
   const { data: historyRows, error } = await db.from('payment_history')
     .select('*, staff(name, department)')
     .eq('period_id', PERIOD_ID)
-    .in('action', ['new', 'topup'])
+    .or('action.eq.new,action.eq.topup')
     .eq('is_voided', false)
     .gte('received_date', dateFrom)
     .lte('received_date', dateTo)
@@ -1967,6 +1967,7 @@ async function downloadDailyReport() {
   if (!payments || payments.length === 0) {
     showAdminMsg(msg, 'No payments found for selected period.', '#ff8080'); return;
   }
+  showAdminMsg(msg, payments.length + ' records found...', '#a0bedd');
 
   // Format dates as DD/MM/YYYY
   const [yf, mf, df] = dateFrom.split('-');
