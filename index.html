@@ -1952,15 +1952,16 @@ async function downloadDailyReport() {
 
   showAdminMsg(msg, 'Generating...', '#a0bedd');
 
-  // Fetch payments with received_date in range
-  const { data: payments, error } = await db.from('payments')
+  // Fetch payment_history grouped by transaction for date range
+  const { data: historyRows, error } = await db.from('payment_history')
     .select('*, staff(name, department)')
     .eq('period_id', PERIOD_ID)
+    .in('action', ['new', 'topup'])
+    .eq('is_voided', false)
     .gte('received_date', dateFrom)
     .lte('received_date', dateTo)
-    .gt('amount', 0)
-    .order('received_date')
-    .order('updated_at');
+    .order('created_at');
+  const payments = historyRows;
 
   if (error) { showAdminMsg(msg, 'Error: ' + error.message, '#ff8080'); return; }
   if (!payments || payments.length === 0) {
@@ -2016,16 +2017,34 @@ async function downloadDailyReport() {
   lines.push('');
 
   let dayTotal = 0;
+  // Group by transaction_id
+  const txnMap = {};
   payments.forEach(p => {
-    const name     = p.staff ? p.staff.name : 'Unknown';
-    const dept     = p.staff ? p.staff.department : '';
-    const month    = MONTHS[p.month_idx] || ('Month ' + p.month_idx);
-    const received = p.amount_received || p.amount;
-    const topup    = (p.amount - received) > 0 ? ' (top-up +' + received + ', total ' + p.amount + ')' : '';
-    const pDate = p.received_date ? (p.received_date.split('-').reverse().join('/')) : dateLabel;
+    const key = p.transaction_id || p.id;
+    if (!txnMap[key]) txnMap[key] = {
+      name: p.staff ? p.staff.name : 'Unknown',
+      dept: p.staff ? p.staff.department : '',
+      received_date: p.received_date,
+      created_at: p.created_at,
+      entries: []
+    };
+    txnMap[key].entries.push(p);
+  });
+
+  // Sort transactions by created_at
+  const txns = Object.values(txnMap).sort((a,b) => a.created_at > b.created_at ? 1 : -1);
+
+  txns.forEach(txn => {
+    const total  = txn.entries.reduce((s,e) => s + e.amount_change, 0);
+    const pDate  = txn.received_date ? txn.received_date.split('-').reverse().join('/') : dateLabelFrom;
     const dateStr = singleDay ? '(' + dateLabelFrom + ')' : '(' + pDate + ')';
-    lines.push(name + ' (' + dept + ') - ' + month + ': GH₵' + received + topup + ' ' + dateStr);
-    dayTotal += received;
+    lines.push(txn.name + ' (' + txn.dept + ') - GH₵' + total + ' ' + dateStr);
+    txn.entries.forEach(e => {
+      const month  = MONTHS[e.month_idx] || ('Month ' + e.month_idx);
+      const topup  = e.action === 'topup' ? ' (top-up)' : '';
+      lines.push('  ' + month + ': GH₵' + e.amount_change + topup);
+    });
+    dayTotal += total;
   });
 
   lines.push('');
