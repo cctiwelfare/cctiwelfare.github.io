@@ -1266,18 +1266,18 @@ function showCard([num, name, dept, payments], staffIdx) {
       }
     }
     return payments.map((val, i) => {
-    let cls, badge;
-    if (i < joinIdx)       { cls = 'pre-member'; badge = 'n/a'; }
-    else if (val === null) { cls = (IS_ADMIN && i === firstUnpaidIdx) ? 'unpaid editable' : 'unpaid'; badge = '—'; }
-    else if (val === 0)    { cls = (IS_ADMIN && i === firstUnpaidIdx) ? 'arrears editable' : 'arrears'; badge = '0'; }
-    else if (val < 40)     { cls = (IS_ADMIN && i === firstUnpaidIdx) ? 'partial editable' : 'partial'; badge = `¢${val} / 40`; }
-    else                   { cls = 'paid'; badge = `¢${val}`; }
-
-    return `<div class="month-row ${cls}" data-month="${i}" data-staff="${staffIdx}">
+      let cls, badge;
+      if (i < joinIdx)       { cls = 'pre-member'; badge = 'n/a'; }
+      else if (val === null) { cls = (IS_ADMIN && i === firstUnpaidIdx) ? 'unpaid editable' : 'unpaid'; badge = '—'; }
+      else if (val === 0)    { cls = (IS_ADMIN && i === firstUnpaidIdx) ? 'arrears editable' : 'arrears'; badge = '0'; }
+      else if (val < 40)     { cls = (IS_ADMIN && i === firstUnpaidIdx) ? 'partial editable' : 'partial'; badge = `¢${val} / 40`; }
+      else                   { cls = 'paid'; badge = `¢${val}`; }
+      return `<div class="month-row ${cls}" data-month="${i}" data-staff="${staffIdx}">
       <span class="month-name">${MONTHS[i]}</span>
       <span class="month-badge">${badge}</span>
     </div>`;
-  });}).join('');
+    }).join('');
+  })();
   const total = payments.reduce((s,v) => s+(v||0), 0);
   resultBox.innerHTML = `
     <div class="card">
