@@ -790,11 +790,13 @@ async function loadData() {
       if (p.note) noteMap[p.staff_id][p.month_idx] = p.note;
       // Use received_date if available, otherwise updated_at
       const payDate = p.received_date ? p.received_date + 'T00:00:00Z' : p.updated_at;
-      if (p.amount > 0 && payDate && payDate > importCutoff) {
+      // Use amount_received (actual cash received) not amount (cell total) to avoid double-counting
+      const receivedAmt = p.amount_received || p.amount || 0;
+      if (receivedAmt > 0 && payDate && payDate > importCutoff) {
         if (!dateMap[p.staff_id] || payDate > dateMap[p.staff_id].date) {
-          dateMap[p.staff_id] = { date: payDate, amount: p.amount };
+          dateMap[p.staff_id] = { date: payDate, amount: receivedAmt };
         } else if (payDate.slice(0,10) === dateMap[p.staff_id].date.slice(0,10)) {
-          dateMap[p.staff_id].amount += p.amount;
+          dateMap[p.staff_id].amount += receivedAmt;
         }
       }
     });
