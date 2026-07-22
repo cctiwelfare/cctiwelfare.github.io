@@ -1313,7 +1313,10 @@ ${buildStatusBar(payments, joinIdx)}
         </div>
         <input type="text" class="note-input" id="paymentNote" placeholder="Note">
         <div id="allocationPreview" style="font-size:11px;color:#276c3a;margin-bottom:8px;display:none"></div>
-        <button class="save-btn" onclick="saveChanges()">Save Payment</button>
+        <div style="display:flex;gap:8px">
+          <button onclick="cancelPayment()" style="flex:1;padding:12px;background:none;border:1px solid #c3e6cb;border-radius:8px;color:#276c3a;font-size:14px;cursor:pointer">Cancel</button>
+          <button class="save-btn" style="flex:2" onclick="saveChanges()">Save Payment</button>
+        </div>
         <div class="save-note">Amount will be distributed across months starting from selected month</div>
       </div>
       </div>
@@ -1413,6 +1416,14 @@ function showPayConfirm(html) {
     document.getElementById('payConfirmOK').onclick     = () => { document.getElementById('payConfirmModal').style.display = 'none'; resolve(true); };
     document.getElementById('payConfirmCancel').onclick = () => { document.getElementById('payConfirmModal').style.display = 'none'; resolve(false); };
   });
+}
+
+function cancelPayment() {
+  const bar = document.getElementById('saveBar');
+  bar.classList.remove('visible');
+  document.getElementById('lumpAmount').value = '';
+  _pendingStartMonth = null;
+  _pendingStaffIdx   = null;
 }
 
 function updateNoteFromDate() {
