@@ -824,7 +824,7 @@ async function loadData() {
     const { data: lastTxns } = await db.from('payment_history')
       .select('staff_id, transaction_id, amount_change, created_at, received_date')
       .eq('period_id', PERIOD_ID)
-      .in('action', ['new', 'topup'])
+      .or('action.eq.new,action.eq.topup')
       .eq('is_voided', false)
       .gt('created_at', importCutoff)
       .order('created_at', { ascending: false });
