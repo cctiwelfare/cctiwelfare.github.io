@@ -1268,8 +1268,12 @@ function buildStatusBar(payments, joinIdx) {
   } else if (behind === 0) {
     return '<div class="status-bar ok"><strong>Paid up to date: ' + currentMonth + '</strong></div>';
   } else {
+    const hasPartialArrears = payments.slice(joinIdx, DUE_MONTHS).some(v => v !== null && v > 0 && v < 40);
+    const hasFullUnpaid     = payments.slice(joinIdx, DUE_MONTHS).some(v => v === null || v === 0);
+    const partialLabel = behind === 1 && hasPartialArrears && !hasFullUnpaid ? ' (partial)'
+      : behind > 1 && hasPartialArrears && hasFullUnpaid ? ' (1 partial)' : '';
     return '<div class="status-bar owe">'
-      + 'You owe <strong>' + behind + ' month' + (behind>1?'s':'') + '</strong> up to ' + currentMonth + ': '
+      + 'You owe <strong>' + behind + ' month' + (behind>1?'s':'') + '</strong> up to ' + currentMonth + partialLabel + ': '
       + '<strong>GH&#x20B5;' + behindTotal.toLocaleString() + '</strong></div>';
   }
 }
