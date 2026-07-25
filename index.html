@@ -986,7 +986,11 @@ function computeStats() {
     } else if (behind === 0) {
       upToDate++;
     } else {
-      defaulters.push({ num, name, dept, behind, paidAhead, totalPaid });
+      const hasPartialOnly = payments.slice(joinIdx, DUE_MONTHS).some(v => v !== null && v > 0 && v < 40)
+        && !payments.slice(joinIdx, DUE_MONTHS).some(v => v === null || v === 0);
+      const hasPartialMix  = payments.slice(joinIdx, DUE_MONTHS).some(v => v !== null && v > 0 && v < 40)
+        && payments.slice(joinIdx, DUE_MONTHS).some(v => v === null || v === 0);
+      defaulters.push({ num, name, dept, behind, paidAhead, totalPaid, hasPartialOnly, hasPartialMix });
     }
   });
 
@@ -1009,7 +1013,7 @@ function computeStats() {
     else if (behind === 0 && hasPartial)  { statusCls = 'dm-ok';     statusLabel = 'Up to date'; }
     else if (behind === 0)                { statusCls = 'dm-ok';     statusLabel = 'Up to date'; }
     else if (hasPartial && !hasFullUnpaid) { statusCls = 'dm-partial';statusLabel = `${behind} month${behind>1?"s":""} behind (partial)`; }
-    else if (hasPartial && hasFullUnpaid)  { statusCls = 'dm-partial';statusLabel = `${behind} month${behind>1?"s":""} behind${behind>1?" (incl. partial)":""}`; }
+    else if (hasPartial && hasFullUnpaid)  { statusCls = 'dm-partial';statusLabel = `${behind} month${behind>1?"s":""} behind (1 partial)`; }
     else if (behind <= 2)                 { statusCls = 'dm-warn';   statusLabel = `${behind} month${behind>1?"s":""} behind`; }
     else                                  { statusCls = 'dm-behind'; statusLabel = `${behind} month${behind>1?"s":""} behind`; }
     if (!deptMembers[dept]) deptMembers[dept] = [];
