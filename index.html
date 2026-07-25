@@ -793,7 +793,7 @@ async function loadData() {
     const payMap  = {};
     const noteMap = {};
     // Only show last payment date for payments entered from 18 July 2026 onwards
-    const importCutoff = '2026-07-17T23:59:59.999Z';
+    window.importCutoff = '2026-07-17T23:59:59.999Z';
     paymentRows.forEach(p => {
       if (!payMap[p.staff_id])  payMap[p.staff_id]  = {};
       if (!noteMap[p.staff_id]) noteMap[p.staff_id] = {};
@@ -1342,7 +1342,7 @@ ${buildStatusBar(payments, joinIdx)}
     .eq('period_id', PERIOD_ID)
     .or('action.eq.new,action.eq.topup')
     .eq('is_voided', false)
-    .gt('created_at', importCutoff)
+    .gt('created_at', window.importCutoff || '2026-07-17T23:59:59.999Z')
     .order('created_at', { ascending: false })
     .then(({ data: hist }) => {
       const el = document.getElementById('lastPaymentInfo');
