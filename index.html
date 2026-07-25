@@ -802,13 +802,10 @@ async function loadData() {
       if (p.note) noteMap[p.staff_id][p.month_idx] = p.note;
       // Use received_date if available, otherwise updated_at
       const payDate = p.received_date ? p.received_date + 'T00:00:00Z' : p.updated_at;
-      // Use amount_received (actual cash received) not amount (cell total) to avoid double-counting
-      const receivedAmt = p.amount_received || p.amount || 0;
-      if (receivedAmt > 0 && payDate && payDate > importCutoff) {
-        if (!dateMap[p.staff_id] || payDate > dateMap[p.staff_id].date) {
-          dateMap[p.staff_id] = { date: payDate, amount: receivedAmt };
-        } else if (payDate.slice(0,10) === dateMap[p.staff_id].date.slice(0,10)) {
-          dateMap[p.staff_id].amount += receivedAmt;
+      if (payDate && payDate > importCutoff) {
+        // Track the most recent payment date per staff (use updated_at for ordering)
+        if (!dateMap[p.staff_id] || p.updated_at > dateMap[p.staff_id].updated_at) {
+          dateMap[p.staff_id] = { date: payDate, updated_at: p.updated_at, amount: 0 };
         }
       }
     });
@@ -822,6 +819,34 @@ async function loadData() {
       });
       return [String(i + 1), s.name, s.department, payments, s.id, dateMap[s.id] || null];
     });
+
+    // Fetch last transaction amounts from payment_history for dateMap
+    const { data: lastTxns } = await db.from('payment_history')
+      .select('staff_id, transaction_id, amount_change, created_at, received_date')
+      .eq('period_id', PERIOD_ID)
+      .in('action', ['new', 'topup'])
+      .eq('is_voided', false)
+      .gt('created_at', importCutoff)
+      .order('created_at', { ascending: false });
+
+    if (lastTxns) {
+      // Group by staff_id, find most recent transaction, sum its amount_change
+      const txnGroups = {};
+      lastTxns.forEach(h => {
+        if (!txnGroups[h.staff_id]) txnGroups[h.staff_id] = {};
+        const key = h.transaction_id || h.created_at;
+        if (!txnGroups[h.staff_id][key]) txnGroups[h.staff_id][key] = { created_at: h.created_at, received_date: h.received_date, total: 0 };
+        txnGroups[h.staff_id][key].total += h.amount_change;
+      });
+      // For each staff, find the most recent transaction
+      Object.entries(txnGroups).forEach(([staffId, txns]) => {
+        const latestTxn = Object.values(txns).sort((a,b) => b.created_at > a.created_at ? 1 : -1)[0];
+        if (latestTxn) {
+          const pd = latestTxn.received_date ? latestTxn.received_date + 'T00:00:00Z' : latestTxn.created_at;
+          dateMap[staffId] = { date: pd, amount: latestTxn.total };
+        }
+      });
+    }
 
     // Sort staffRows by staff_no to match Excel order
     staffRows.sort((a, b) => {
