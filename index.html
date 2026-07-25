@@ -508,6 +508,18 @@ footer { color: #1e3d6b; font-size: 11px; text-align: center; padding: 16px; mar
       <div id="glicoList" style="margin-top:14px"></div>
     </div>
 
+    <!-- Current Arrears Month -->
+    <div class="section-head">Current Arrears Month</div>
+    <div style="background:#162d55;border-radius:12px;padding:16px;margin-bottom:16px">
+      <div style="color:#a0bedd;font-size:12px;margin-bottom:12px">Override the arrears month for staff cards, dashboard and reminders. Auto uses previous calendar month.</div>
+      <div style="margin-bottom:14px">
+        <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">Arrears Month</label>
+        <select id="arrearsMonthSelect" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:14px;outline:none"></select>
+      </div>
+      <button onclick="saveArrearsMonth()" style="width:100%;padding:12px;background:#1a4b8c;border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:700;cursor:pointer">Save Arrears Month</button>
+      <div id="arrearsMonthMsg" style="margin-top:8px;font-size:12px;text-align:center;display:none"></div>
+    </div>
+
     <!-- Manage Staff -->
     <div class="section-head">Deactivate Staff</div>
     <div style="background:#162d55;border-radius:12px;padding:16px">
@@ -844,6 +856,14 @@ async function loadData() {
     const { data: settingsRows } = await db.from('settings').select('*');
     if (settingsRows) {
       settingsRows.forEach(s => { window._settings = window._settings || {}; window._settings[s.key] = s.value; });
+    }
+    // Override CURRENT_IDX if arrears_month_idx is set in settings
+    if (window._settings && window._settings['arrears_month_idx'] !== undefined) {
+      const overrideIdx = parseInt(window._settings['arrears_month_idx']);
+      if (!isNaN(overrideIdx) && overrideIdx >= 0 && overrideIdx < MONTHS.length) {
+        CURRENT_IDX = overrideIdx;
+        DUE_MONTHS  = overrideIdx + 1;
+      }
     }
 
     document.getElementById('loadingScreen').style.display = 'none';
@@ -1834,6 +1854,12 @@ async function setupAdminPanel() {
 
   const countEl = document.getElementById('currentMonthCount');
   if (countEl) countEl.textContent = MONTHS.length + ' months (' + MONTHS[0] + ' to ' + MONTHS[MONTHS.length-1] + ')';
+
+  const arrearsSel = document.getElementById('arrearsMonthSelect');
+  if (arrearsSel) {
+    arrearsSel.innerHTML = MONTHS.map((m, i) => `<option value="${i}">${m}</option>`).join('');
+    arrearsSel.value = CURRENT_IDX;
+  }
   const dateEl = document.getElementById('glicoDate');
   if (dateEl) dateEl.value = today;
   const reportDateFromEl = document.getElementById('reportDateFrom');
@@ -1918,6 +1944,12 @@ async function addMonth() {
   showAdminMsg(msg, label + ' added! Refresh to activate it.', '#5fdb80');
   const countEl = document.getElementById('currentMonthCount');
   if (countEl) countEl.textContent = MONTHS.length + ' months (' + MONTHS[0] + ' to ' + MONTHS[MONTHS.length-1] + ')';
+
+  const arrearsSel = document.getElementById('arrearsMonthSelect');
+  if (arrearsSel) {
+    arrearsSel.innerHTML = MONTHS.map((m, i) => `<option value="${i}">${m}</option>`).join('');
+    arrearsSel.value = CURRENT_IDX;
+  }
 
   // Set default date to today
   const today = new Date().toISOString().slice(0,10);
@@ -2542,6 +2574,22 @@ async function reactivateStaffMember() {
   showAdminMsg(msg, name + ' reactivated. Refresh to update the list.', '#5fdb80');
   sel.remove(sel.selectedIndex);
   if (sel.options.length === 0) sel.innerHTML = '<option>No inactive staff</option>';
+}
+
+// ── Arrears Month ────────────────────────────────────────────
+async function saveArrearsMonth() {
+  const sel = document.getElementById('arrearsMonthSelect');
+  const idx = parseInt(sel.value);
+  const msg = document.getElementById('arrearsMonthMsg');
+  showAdminMsg(msg, 'Saving...', '#a0bedd');
+
+  const { error } = await db.from('settings')
+    .upsert({ key: 'arrears_month_idx', value: String(idx) }, { onConflict: 'key' });
+
+  if (error) { showAdminMsg(msg, 'Error: ' + error.message, '#ff8080'); return; }
+
+  showAdminMsg(msg, 'Arrears month set to ' + MONTHS[idx] + '. Reloading...', '#5fdb80');
+  setTimeout(() => location.reload(), 1500);
 }
 
 // ── Edit Staff ───────────────────────────────────────────────
