@@ -2545,9 +2545,12 @@ function exportArrears() {
     const behindTotal = payments.slice(joinIdx, DUE_MONTHS)
       .reduce((sum, v) => v === null || v < 40 ? sum + (40 - (v || 0)) : sum, 0);
     if (behindTotal > 0) {
-      const monthsBehind = payments.slice(joinIdx, DUE_MONTHS)
-        .filter(v => v === null || v < 40).length;
-      arrears.push({ num, name, dept, monthsBehind, behindTotal });
+      const monthsBehind    = payments.slice(joinIdx, DUE_MONTHS).filter(v => v === null || v < 40).length;
+      const hasPartialOnly  = payments.slice(joinIdx, DUE_MONTHS).some(v => v !== null && v > 0 && v < 40)
+        && !payments.slice(joinIdx, DUE_MONTHS).some(v => v === null || v === 0);
+      const hasPartialMix   = payments.slice(joinIdx, DUE_MONTHS).some(v => v !== null && v > 0 && v < 40)
+        && payments.slice(joinIdx, DUE_MONTHS).some(v => v === null || v === 0);
+      arrears.push({ num, name, dept, monthsBehind, behindTotal, hasPartialOnly, hasPartialMix });
     }
   });
 
@@ -2566,8 +2569,10 @@ function exportArrears() {
     lines.push(dept.toUpperCase());
     lines.push('-'.repeat(30));
     staff.forEach(s => {
+      const partialLabel = s.monthsBehind === 1 && s.hasPartialOnly ? ' (partial)'
+        : s.monthsBehind > 1 && s.hasPartialMix ? ' (1 partial)' : '';
       lines.push(serial + '. ' + s.name + ' — '
-        + s.monthsBehind + ' month' + (s.monthsBehind > 1 ? 's' : '')
+        + s.monthsBehind + ' month' + (s.monthsBehind > 1 ? 's' : '') + partialLabel
         + ' — GH₵' + s.behindTotal.toLocaleString());
       serial++;
     });
