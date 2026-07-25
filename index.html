@@ -988,7 +988,9 @@ function computeStats() {
         && !payments.slice(joinIdx, DUE_MONTHS).some(v => v === null || v === 0);
       const hasPartialMix  = payments.slice(joinIdx, DUE_MONTHS).some(v => v !== null && v > 0 && v < 40)
         && payments.slice(joinIdx, DUE_MONTHS).some(v => v === null || v === 0);
-      defaulters.push({ num, name, dept, behind, paidAhead, totalPaid, hasPartialOnly, hasPartialMix });
+      const lastAheadVal = payments.slice(DUE_MONTHS).filter(v => v !== null && v > 0).slice(-1)[0];
+      const hasPartialAdv = lastAheadVal && lastAheadVal < 40;
+      defaulters.push({ num, name, dept, behind, paidAhead, totalPaid, hasPartialOnly, hasPartialMix, hasPartialAdv });
     }
   });
 
@@ -1007,7 +1009,12 @@ function computeStats() {
     const hasFullUnpaid = payments.slice(joinIdx, DUE_MONTHS).some(v => v === null || v === 0);
     const showInclPartial = hasPartial && hasFullUnpaid;
     let statusCls, statusLabel;
-    if (behind === 0 && paidAhead > 0)   { statusCls = 'dm-ahead';  statusLabel = `Ahead +${paidAhead}`; }
+    if (behind === 0 && paidAhead > 0)   {
+      const lastAhead = payments.slice(DUE_MONTHS).filter(v => v !== null && v > 0).slice(-1)[0];
+      const partAdv   = lastAhead && lastAhead < 40;
+      const advLbl    = paidAhead === 1 && partAdv ? 'Ahead +1 (partial)'
+        : paidAhead > 1 && partAdv ? `Ahead +${paidAhead} (1 partial)` : `Ahead +${paidAhead}`;
+      statusCls = 'dm-ahead'; statusLabel = advLbl; }
     else if (behind === 0 && hasPartial)  { statusCls = 'dm-ok';     statusLabel = 'Up to date'; }
     else if (behind === 0)                { statusCls = 'dm-ok';     statusLabel = 'Up to date'; }
     else if (hasPartial && !hasFullUnpaid) { statusCls = 'dm-partial';statusLabel = `${behind} month${behind>1?"s":""} behind (partial)`; }
@@ -1125,7 +1132,7 @@ function renderDash() {
     <div class="defaulter-item">
       <div>
         <div class="def-name">${d.name}</div>
-        <div class="def-dept">${d.dept}${d.paidAhead>0?' · <span style="color:#5fdb80;font-size:10px">+'+d.paidAhead+' ahead</span>':''}</div>
+        <div class="def-dept">${d.dept}${d.paidAhead>0?' · <span style="color:#5fdb80;font-size:10px">+'+d.paidAhead+' ahead'+(d.paidAhead===1&&d.hasPartialAdv?' (partial)':d.paidAhead>1&&d.hasPartialAdv?' (1 partial)':'')+'</span>':''}</div>
       </div>
       <div class="def-badge ${d.behind<=2?'warn':''}">${d.behind} month${d.behind>1?'s':''} behind${d.hasPartialOnly?' (partial)':d.hasPartialMix?' (1 partial)':''}</div>
     </div>`).join('')}
@@ -1256,7 +1263,14 @@ function buildStatusBar(payments, joinIdx) {
 
   const currentMonth = MONTHS[CURRENT_IDX].replace(/\s*\'(\d{2})$/, (_, y) => ' 20' + y);
   if (behind === 0 && paidAhead > 0) {
-    return '<div class="status-bar ahead"><strong>' + paidAhead + ' month' + (paidAhead>1?'s':'') + ' paid in advance beyond ' + currentMonth + ': GH&#x20B5;' + aheadTotal.toLocaleString() + '</strong></div>';
+    const lastAdvanceVal = payments.slice(DUE_MONTHS).filter(v => v !== null && v > 0).slice(-1)[0];
+    const partialAdvance = lastAdvanceVal && lastAdvanceVal < 40;
+    const advanceLabel = paidAhead === 1 && partialAdvance
+      ? '1 month paid in advance beyond ' + currentMonth + ' (partial)'
+      : paidAhead > 1 && partialAdvance
+        ? paidAhead + ' months paid in advance beyond ' + currentMonth + ' (1 partial)'
+        : paidAhead + ' month' + (paidAhead>1?'s':'') + ' paid in advance beyond ' + currentMonth;
+    return '<div class="status-bar ahead"><strong>' + advanceLabel + ': GH&#x20B5;' + aheadTotal.toLocaleString() + '</strong></div>';
   } else if (behind === 0) {
     return '<div class="status-bar ok"><strong>Paid up to date: ' + currentMonth + '</strong></div>';
   } else {
