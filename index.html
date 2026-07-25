@@ -792,7 +792,6 @@ async function loadData() {
     // Build payment map: staff_id -> { month_idx -> amount }
     const payMap  = {};
     const noteMap = {};
-    const dateMap = {};
     // Only show last payment date for payments entered from 18 July 2026 onwards
     const importCutoff = '2026-07-17T23:59:59.999Z';
     paymentRows.forEach(p => {
@@ -801,13 +800,7 @@ async function loadData() {
       payMap[p.staff_id][p.month_idx]  = p.amount;
       if (p.note) noteMap[p.staff_id][p.month_idx] = p.note;
       // Use received_date if available, otherwise updated_at
-      const payDate = p.received_date ? p.received_date + 'T00:00:00Z' : p.updated_at;
-      if (payDate && payDate > importCutoff) {
-        // Track the most recent payment date per staff (use updated_at for ordering)
-        if (!dateMap[p.staff_id] || p.updated_at > dateMap[p.staff_id].updated_at) {
-          dateMap[p.staff_id] = { date: payDate, updated_at: p.updated_at, amount: 0 };
-        }
-      }
+      // last payment handled separately per staff card
     });
 
     // Build STAFF array: [no, name, dept, payments[]]
@@ -817,47 +810,8 @@ async function loadData() {
         if (i < s.joined_month) return null; // pre-membership
         return payMap[s.id] && payMap[s.id][i] !== undefined ? payMap[s.id][i] : null;
       });
-      return [String(i + 1), s.name, s.department, payments, s.id, dateMap[s.id] || null];
+      return [String(i + 1), s.name, s.department, payments, s.id];
     });
-
-    // Fetch last transaction amounts from payment_history for dateMap
-    const { data: lastTxns } = await db.from('payment_history')
-      .select('staff_id, transaction_id, amount_change, created_at, received_date')
-      .eq('period_id', PERIOD_ID)
-      .or('action.eq.new,action.eq.topup')
-      .eq('is_voided', false)
-      .gt('created_at', importCutoff)
-      .order('created_at', { ascending: false });
-
-    if (lastTxns && lastTxns.length > 0) {
-      // For each staff, find the most recent transaction_id and sum its amount_change
-      // lastTxns is ordered by created_at desc so first entry per staff is most recent
-      const seenStaff  = new Set();
-      const seenTxns   = {};
-
-      lastTxns.forEach(h => {
-        const sid = h.staff_id;
-        const key = h.transaction_id || ('solo_' + h.created_at + '_' + sid);
-
-        // Track transaction totals
-        if (!seenTxns[key]) seenTxns[key] = { staff_id: sid, created_at: h.created_at, received_date: h.received_date, total: 0 };
-        seenTxns[key].total += (h.amount_change || 0);
-      });
-
-      // For each staff pick their most recent transaction
-      const staffLatest = {};
-      Object.values(seenTxns).forEach(txn => {
-        const sid = txn.staff_id;
-        if (!staffLatest[sid] || txn.created_at > staffLatest[sid].created_at) {
-          staffLatest[sid] = txn;
-        }
-      });
-
-      Object.entries(staffLatest).forEach(([staffId, txn]) => {
-        const pd = txn.received_date ? txn.received_date + 'T00:00:00Z' : txn.created_at;
-        dateMap[parseInt(staffId)] = { date: pd, amount: txn.total };
-      });
-    }
 
     // Sort staffRows by staff_no to match Excel order
     staffRows.sort((a, b) => {
@@ -1353,12 +1307,7 @@ function showCard([num, name, dept, payments], staffIdx) {
         <span class="total-amount" id="cardTotal">¢${total.toLocaleString()}</span>
       </div>
 ${buildStatusBar(payments, joinIdx)}
-      ${(() => {
-        const info = STAFF[staffIdx][5];
-        if (!info) return '';
-        const lastDate = new Date(info.date).toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'numeric'});
-        return '<div style="font-size:11px;color:#6a8ab5;text-align:center;padding:4px 0">Last payment: GH&#x20B5;' + info.amount.toLocaleString() + ' on ' + lastDate + '</div>';
-      })()}
+      <div id="lastPaymentInfo" style="font-size:11px;color:#6a8ab5;text-align:center;padding:4px 0"></div>
       <div class="save-bar" id="saveBar">
         <div id="monthHint" style="font-size:11px;color:#276c3a;margin-bottom:8px;font-weight:600"></div>
         <div style="display:flex;gap:8px;margin-bottom:8px;align-items:flex-end">
@@ -1384,6 +1333,33 @@ ${buildStatusBar(payments, joinIdx)}
   document.querySelectorAll('.month-row.editable').forEach(row => {
     row.addEventListener('click', () => startEdit(row));
   });
+
+  // Fetch last payment from payment_history
+  const staffDbId = STAFF[staffIdx][4];
+  db.from('payment_history')
+    .select('transaction_id, amount_change, created_at, received_date')
+    .eq('staff_id', staffDbId)
+    .eq('period_id', PERIOD_ID)
+    .or('action.eq.new,action.eq.topup')
+    .eq('is_voided', false)
+    .gt('created_at', importCutoff)
+    .order('created_at', { ascending: false })
+    .then(({ data: hist }) => {
+      const el = document.getElementById('lastPaymentInfo');
+      if (!el || !hist || hist.length === 0) return;
+      // Group by transaction_id to get most recent transaction total
+      const txnTotals = {};
+      hist.forEach(h => {
+        const key = h.transaction_id || h.created_at;
+        if (!txnTotals[key]) txnTotals[key] = { created_at: h.created_at, received_date: h.received_date, total: 0 };
+        txnTotals[key].total += h.amount_change;
+      });
+      const latest = Object.values(txnTotals).sort((a,b) => b.created_at > a.created_at ? 1 : -1)[0];
+      if (!latest) return;
+      const pd = latest.received_date || latest.created_at.slice(0,10);
+      const dateStr = new Date(pd + 'T00:00:00').toLocaleDateString('en-GB', {day:'2-digit',month:'short',year:'numeric'});
+      el.textContent = 'Last payment: GH₵' + latest.total.toLocaleString() + ' on ' + dateStr;
+    });
 
   resultBox.classList.add('visible');
   resultBox.scrollIntoView({ behavior:'smooth', block:'nearest' });
