@@ -947,9 +947,7 @@ function computeStats() {
   const totalGlicoPaid = GLICO_PAID.reduce((a,b)=>a+b.amount,0);
   const balance = totalCollected - totalGlicoPaid;
 
-  // Jun 2026 = index 9 (Sep'25=0, Oct'25=1 ... Jun'26=9)
-  const CURRENT_IDX = 9;
-  const DUE_MONTHS  = CURRENT_IDX + 1; // 10 months are due
+  // Use global CURRENT_IDX and DUE_MONTHS (respects manual arrears month override)
 
   let upToDate = 0, aheadCount = 0;
   const defaulters = [];
