@@ -829,22 +829,33 @@ async function loadData() {
       .gt('created_at', importCutoff)
       .order('created_at', { ascending: false });
 
-    if (lastTxns) {
-      // Group by staff_id, find most recent transaction, sum its amount_change
-      const txnGroups = {};
+    if (lastTxns && lastTxns.length > 0) {
+      // For each staff, find the most recent transaction_id and sum its amount_change
+      // lastTxns is ordered by created_at desc so first entry per staff is most recent
+      const seenStaff  = new Set();
+      const seenTxns   = {};
+
       lastTxns.forEach(h => {
-        if (!txnGroups[h.staff_id]) txnGroups[h.staff_id] = {};
-        const key = h.transaction_id || h.created_at;
-        if (!txnGroups[h.staff_id][key]) txnGroups[h.staff_id][key] = { created_at: h.created_at, received_date: h.received_date, total: 0 };
-        txnGroups[h.staff_id][key].total += h.amount_change;
+        const sid = h.staff_id;
+        const key = h.transaction_id || ('solo_' + h.created_at + '_' + sid);
+
+        // Track transaction totals
+        if (!seenTxns[key]) seenTxns[key] = { staff_id: sid, created_at: h.created_at, received_date: h.received_date, total: 0 };
+        seenTxns[key].total += (h.amount_change || 0);
       });
-      // For each staff, find the most recent transaction
-      Object.entries(txnGroups).forEach(([staffId, txns]) => {
-        const latestTxn = Object.values(txns).sort((a,b) => b.created_at > a.created_at ? 1 : -1)[0];
-        if (latestTxn) {
-          const pd = latestTxn.received_date ? latestTxn.received_date + 'T00:00:00Z' : latestTxn.created_at;
-          dateMap[staffId] = { date: pd, amount: latestTxn.total };
+
+      // For each staff pick their most recent transaction
+      const staffLatest = {};
+      Object.values(seenTxns).forEach(txn => {
+        const sid = txn.staff_id;
+        if (!staffLatest[sid] || txn.created_at > staffLatest[sid].created_at) {
+          staffLatest[sid] = txn;
         }
+      });
+
+      Object.entries(staffLatest).forEach(([staffId, txn]) => {
+        const pd = txn.received_date ? txn.received_date + 'T00:00:00Z' : txn.created_at;
+        dateMap[parseInt(staffId)] = { date: pd, amount: txn.total };
       });
     }
 
