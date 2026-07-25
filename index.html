@@ -970,9 +970,7 @@ function computeStats() {
     const behind = memberDueMonths - paidInWindow;
 
     // months paid beyond Jun'26 (advance) — only full payments
-    const paidAhead = payments
-      .slice(DUE_MONTHS)
-      .filter(v => v !== null && v >= 40).length;
+    const paidAhead = payments.slice(DUE_MONTHS).filter(v => v !== null && v > 0).length;
 
     if (!deptMap[dept]) deptMap[dept] = {count:0, paidMonths:0, dueMonths:0};
     deptMap[dept].count++;
@@ -1004,7 +1002,7 @@ function computeStats() {
     const memberDueMonths = Math.max(0, DUE_MONTHS - joinIdx);
     const paidInWindow = payments.slice(joinIdx, DUE_MONTHS).filter(v => v !== null && v >= 40).length;
     const behind = memberDueMonths - paidInWindow;
-    const paidAhead = payments.slice(DUE_MONTHS).filter(v => v !== null && v >= 40).length;
+    const paidAhead = payments.slice(DUE_MONTHS).filter(v => v !== null && v > 0).length;
     const hasPartial   = payments.slice(joinIdx, DUE_MONTHS).some(v => v !== null && v > 0 && v < 40);
     const hasFullUnpaid = payments.slice(joinIdx, DUE_MONTHS).some(v => v === null || v === 0);
     const showInclPartial = hasPartial && hasFullUnpaid;
