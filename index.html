@@ -919,19 +919,7 @@ async function savePaymentToDb(staffDbId, staffName, monthIdx, amount, note, dat
     };
     await db.from('payment_history').insert(historyPayload);
 
-    saveBtn.textContent = 'Saved!';
-    saveBtn.style.background = '#155724';
-    const noteEl = document.getElementById('paymentNote');
-    if (noteEl) noteEl.value = '';
-    // Recalculate totals — always add INACTIVE_TOTAL for accuracy
-    MONTHLY_TOTALS = new Array(MONTHS.length).fill(0);
-    STAFF.forEach(([,,,p]) => p.forEach((v,i) => { if (v) MONTHLY_TOTALS[i] += v; }));
-    TOTAL_COLLECTED = MONTHLY_TOTALS.reduce((a,b) => a+b, 0) + INACTIVE_TOTAL;
-    setTimeout(() => {
-      saveBtn.textContent = 'Save Payment';
-      saveBtn.style.background = '';
-      saveBtn.disabled = false;
-    }, 2000);
+    // saveBtn UI reset is handled by saveChanges after all edits complete
   } catch(err) {
     saveBtn.textContent = 'Failed - retry';
     saveBtn.disabled = false;
@@ -1582,17 +1570,21 @@ async function saveChanges() {
       STAFF[staffIdx][3][e.monthIdx] = e.newVal;
     }
 
-    saveBtn.textContent = 'Saved!';
-    saveBtn.style.background = '#155724';
-    setTimeout(() => {
-      saveBtn.textContent = 'Save Payment';
-      saveBtn.style.background = '';
-      saveBtn.disabled = false;
-    }, 2000);
-
-    // Send SMS notification
-    const totalReceived = edits.reduce((s,e) => s+e.received, 0);
-    sendPaymentSMS(staffIdx, totalReceived, dateRcvd);
+    // Re-fetch this staff member's payments from DB to guarantee card shows accurate data
+    const staffDbId = STAFF[staffIdx][4];
+    const joinIdx = STAFF[staffIdx][3].findIndex(v => v !== null);
+    const { data: freshPayments } = await db.from('payments')
+      .select('month_idx, amount')
+      .eq('staff_id', staffDbId)
+      .eq('period_id', PERIOD_ID);
+    if (freshPayments) {
+      const freshMap = {};
+      freshPayments.forEach(p => { freshMap[p.month_idx] = p.amount; });
+      STAFF[staffIdx][3] = MONTHS.map((_, i) => {
+        if (i < joinIdx) return null;
+        return freshMap[i] !== undefined ? freshMap[i] : null;
+      });
+    }
 
     // Recalculate totals
     MONTHLY_TOTALS = new Array(MONTHS.length).fill(0);
@@ -1601,7 +1593,17 @@ async function saveChanges() {
 
     // Refresh card
     showCard(STAFF[staffIdx], staffIdx);
-    document.getElementById('lumpAmount').value = '';
+
+    saveBtn.textContent = 'Saved!';
+    saveBtn.style.background = '#155724';
+    setTimeout(() => {
+      const btn = document.querySelector('#saveBar .save-btn');
+      if (btn) { btn.textContent = 'Save Payment'; btn.style.background = ''; btn.disabled = false; }
+    }, 2000);
+
+    // Send SMS notification (fire and forget)
+    const totalReceived = edits.reduce((s,e) => s+e.received, 0);
+    sendPaymentSMS(staffIdx, totalReceived, dateRcvd);
 
   } catch(err) {
     saveBtn.textContent = 'Failed - retry';
