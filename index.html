@@ -859,6 +859,20 @@ async function loadData() {
     document.getElementById('loadingScreen').style.display = 'none';
     document.getElementById('adminLoginBtn').style.display = IS_ADMIN ? 'none' : 'block';
 
+    // If we reloaded after a save, re-open that staff member's card
+    const reloadName = sessionStorage.getItem('reloadStaffName');
+    if (reloadName) {
+      sessionStorage.removeItem('reloadStaffName');
+      sessionStorage.removeItem('reloadStaffIdx');
+      const idx = STAFF.findIndex(s => s[1] === reloadName);
+      if (idx > -1) {
+        document.getElementById('searchInput').value = reloadName;
+        document.getElementById('clearBtn').classList.add('visible');
+        document.getElementById('prompt').style.display = 'none';
+        showCard(STAFF[idx], idx);
+      }
+    }
+
   } catch(err) {
     console.error(err);
     document.getElementById('loadingScreen').innerHTML =
@@ -1570,40 +1584,18 @@ async function saveChanges() {
       STAFF[staffIdx][3][e.monthIdx] = e.newVal;
     }
 
-    // Re-fetch this staff member's payments from DB to guarantee card shows accurate data
-    const staffDbId = STAFF[staffIdx][4];
-    const joinIdx = STAFF[staffIdx][3].findIndex(v => v !== null);
-    const { data: freshPayments } = await db.from('payments')
-      .select('month_idx, amount')
-      .eq('staff_id', staffDbId)
-      .eq('period_id', PERIOD_ID);
-    if (freshPayments) {
-      const freshMap = {};
-      freshPayments.forEach(p => { freshMap[p.month_idx] = p.amount; });
-      STAFF[staffIdx][3] = MONTHS.map((_, i) => {
-        if (i < joinIdx) return null;
-        return freshMap[i] !== undefined ? freshMap[i] : null;
-      });
-    }
-
-    // Recalculate totals
-    MONTHLY_TOTALS = new Array(MONTHS.length).fill(0);
-    STAFF.forEach(([,,,p]) => p.forEach((v,i) => { if (v) MONTHLY_TOTALS[i] += v; }));
-    TOTAL_COLLECTED = MONTHLY_TOTALS.reduce((a,b) => a+b, 0) + INACTIVE_TOTAL;
-
-    // Refresh card
-    showCard(STAFF[staffIdx], staffIdx);
-
-    saveBtn.textContent = 'Saved!';
-    saveBtn.style.background = '#155724';
-    setTimeout(() => {
-      const btn = document.querySelector('#saveBar .save-btn');
-      if (btn) { btn.textContent = 'Save Payment'; btn.style.background = ''; btn.disabled = false; }
-    }, 2000);
+    // Reload the page to guarantee fresh data is shown
+    // Store the staff name so we can re-open their card after reload
+    sessionStorage.setItem('reloadStaffIdx', staffIdx);
+    sessionStorage.setItem('reloadStaffName', STAFF[staffIdx][1]);
 
     // Send SMS notification (fire and forget)
     const totalReceived = edits.reduce((s,e) => s+e.received, 0);
     sendPaymentSMS(staffIdx, totalReceived, dateRcvd);
+
+    saveBtn.textContent = 'Saved! Reloading...';
+    saveBtn.style.background = '#155724';
+    setTimeout(() => location.reload(), 1200);
 
   } catch(err) {
     saveBtn.textContent = 'Failed - retry';
