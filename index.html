@@ -688,6 +688,23 @@ const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFz
 const { createClient } = supabase;
 const db = createClient(SUPABASE_URL, SUPABASE_ANON);
 
+// ── Pagination helper — Supabase caps a single query at 1000 rows by default.
+// This fetches all matching rows for 'payments' by paging through in batches of 1000.
+async function fetchAllRows(table, periodId) {
+  const pageSize = 1000;
+  let allRows = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await db.from(table).select('*').eq('period_id', periodId).range(from, from + pageSize - 1);
+    if (error) { console.error('fetchAllRows error:', error); break; }
+    if (!data || data.length === 0) break;
+    allRows = allRows.concat(data);
+    if (data.length < pageSize) break; // last page
+    from += pageSize;
+  }
+  return allRows;
+}
+
 // ── App state ─────────────────────────────────────────────────
 let MONTHS = [], STAFF = [], GLICO_PAID = [], MONTHLY_TOTALS = [];
 let TOTAL_COLLECTED = 0, CURRENT_IDX = 0, DUE_MONTHS = 0;
@@ -786,8 +803,8 @@ async function loadData() {
     const { data: fullStaffRows } = await db.from('staff').select('*').order('sort_order');
     window._allStaffRows = fullStaffRows || [];
 
-    // Fetch all payments for this period
-    const { data: paymentRows } = await db.from('payments').select('*').eq('period_id', PERIOD_ID);
+    // Fetch all payments for this period (paginated to bypass Supabase's 1000-row default limit)
+    const paymentRows = await fetchAllRows('payments', PERIOD_ID);
 
     // Build payment map: staff_id -> { month_idx -> amount }
     const payMap  = {};
@@ -1619,7 +1636,7 @@ async function exportExcel() {
 
   try {
     const { data: allStaff }    = await db.from('staff').select('*').order('sort_order');
-    const { data: allPayments } = await db.from('payments').select('*').eq('period_id', PERIOD_ID);
+    const allPayments           = await fetchAllRows('payments', PERIOD_ID);
     const { data: period }      = await db.from('periods').select('*').eq('id', PERIOD_ID).single();
     const { data: glico }       = await db.from('glico_payments').select('*').eq('period_id', PERIOD_ID).order('paid_date');
 
