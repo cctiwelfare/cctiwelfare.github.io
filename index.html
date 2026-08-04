@@ -859,19 +859,7 @@ async function loadData() {
     document.getElementById('loadingScreen').style.display = 'none';
     document.getElementById('adminLoginBtn').style.display = IS_ADMIN ? 'none' : 'block';
 
-    // If we reloaded after a save, re-open that staff member's card
-    const reloadName = sessionStorage.getItem('reloadStaffName');
-    if (reloadName) {
-      sessionStorage.removeItem('reloadStaffName');
-      sessionStorage.removeItem('reloadStaffIdx');
-      const idx = STAFF.findIndex(s => s[1] === reloadName);
-      if (idx > -1) {
-        document.getElementById('searchInput').value = reloadName;
-        document.getElementById('clearBtn').classList.add('visible');
-        document.getElementById('prompt').style.display = 'none';
-        showCard(STAFF[idx], idx);
-      }
-    }
+
 
   } catch(err) {
     console.error(err);
@@ -1584,18 +1572,92 @@ async function saveChanges() {
       STAFF[staffIdx][3][e.monthIdx] = e.newVal;
     }
 
-    // Reload the page to guarantee fresh data is shown
-    // Store the staff name so we can re-open their card after reload
-    sessionStorage.setItem('reloadStaffIdx', staffIdx);
-    sessionStorage.setItem('reloadStaffName', STAFF[staffIdx][1]);
+    // Directly update each changed month row in the DOM
+    const payments = STAFF[staffIdx][3];
+    const joinIdx  = payments.findIndex(v => v !== null);
+
+    // Recompute firstUnpaidIdx after edits
+    let firstUnpaidIdx = -1;
+    for (let i = joinIdx; i < payments.length; i++) {
+      if (payments[i] === null || payments[i] === undefined || payments[i] < 40) {
+        firstUnpaidIdx = i; break;
+      }
+    }
+
+    edits.forEach(e => {
+      const row = document.querySelector(`.month-row[data-month="${e.monthIdx}"]`);
+      if (!row) return;
+      const badge = row.querySelector('.month-badge');
+      const nameEl = row.querySelector('.month-name');
+      const val = e.newVal;
+
+      // Remove all state classes
+      row.classList.remove('unpaid','paid','arrears','partial','editable');
+
+      if (val >= 40) {
+        row.classList.add('paid');
+        if (badge) badge.textContent = '¢' + val;
+      } else if (val > 0) {
+        const isEditable = IS_ADMIN && e.monthIdx === firstUnpaidIdx;
+        row.classList.add('partial');
+        if (isEditable) row.classList.add('editable');
+        if (badge) badge.textContent = '¢' + val + ' / 40';
+      } else {
+        const isEditable = IS_ADMIN && e.monthIdx === firstUnpaidIdx;
+        row.classList.add('arrears');
+        if (isEditable) row.classList.add('editable');
+        if (badge) badge.textContent = '0';
+      }
+    });
+
+    // Update the next unpaid month to be editable (if admin)
+    if (IS_ADMIN) {
+      document.querySelectorAll('.month-row.editable').forEach(r => {
+        const mi = parseInt(r.dataset.month);
+        if (mi !== firstUnpaidIdx) {
+          r.classList.remove('editable');
+          r.replaceWith(r.cloneNode(true)); // remove old listeners
+        }
+      });
+      if (firstUnpaidIdx > -1) {
+        const nextRow = document.querySelector(`.month-row[data-month="${firstUnpaidIdx}"]`);
+        if (nextRow && !nextRow.classList.contains('editable')) {
+          nextRow.classList.add('editable');
+          nextRow.addEventListener('click', () => startEdit(nextRow));
+        }
+      }
+    }
+
+    // Update total bar
+    const newTotal = payments.reduce((s,v) => s+(v||0), 0);
+    const totalEl = document.getElementById('cardTotal');
+    if (totalEl) totalEl.textContent = '¢' + newTotal.toLocaleString();
+
+    // Update status bar
+    const statusEl = document.querySelector('.status-bar');
+    if (statusEl) statusEl.outerHTML = buildStatusBar(payments, joinIdx);
+
+    // Recalculate global totals
+    MONTHLY_TOTALS = new Array(MONTHS.length).fill(0);
+    STAFF.forEach(([,,,p]) => p.forEach((v,i) => { if (v) MONTHLY_TOTALS[i] += v; }));
+    TOTAL_COLLECTED = MONTHLY_TOTALS.reduce((a,b) => a+b, 0) + INACTIVE_TOTAL;
+
+    // Hide save bar
+    const bar = document.getElementById('saveBar');
+    if (bar) bar.classList.remove('visible');
+    _pendingStartMonth = null;
+    _pendingStaffIdx   = null;
 
     // Send SMS notification (fire and forget)
     const totalReceived = edits.reduce((s,e) => s+e.received, 0);
     sendPaymentSMS(staffIdx, totalReceived, dateRcvd);
 
-    saveBtn.textContent = 'Saved! Reloading...';
+    saveBtn.textContent = 'Saved!';
     saveBtn.style.background = '#155724';
-    setTimeout(() => location.reload(), 1200);
+    setTimeout(() => {
+      const btn = document.querySelector('#saveBar .save-btn');
+      if (btn) { btn.textContent = 'Save Payment'; btn.style.background = ''; btn.disabled = false; }
+    }, 2000);
 
   } catch(err) {
     saveBtn.textContent = 'Failed - retry';
