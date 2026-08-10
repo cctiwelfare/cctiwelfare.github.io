@@ -2119,13 +2119,14 @@ async function downloadDailyReport() {
   const baseBalanceDate = (window._settings && window._settings['base_balance_date']) || '2026-07-18';
   let prevTotal = baseBalance;
   if (dateFrom > baseBalanceDate) {
-    const { data: prevPayments } = await db.from('payments')
-      .select('amount_received, amount')
+    const { data: prevHistory } = await db.from('payment_history')
+      .select('amount_change')
       .eq('period_id', PERIOD_ID)
+      .or('action.eq.new,action.eq.topup')
+      .eq('is_voided', false)
       .gte('received_date', baseBalanceDate)
-      .lt('received_date', dateFrom)
-      .gt('amount', 0);
-    prevTotal += (prevPayments || []).reduce((s,p) => s + (p.amount_received || p.amount), 0);
+      .lt('received_date', dateFrom);
+    prevTotal += (prevHistory || []).reduce((s,p) => s + (p.amount_change || 0), 0);
   }
   const openingBalanceEl = document.getElementById('reportOpeningBalance');
   if (openingBalanceEl) openingBalanceEl.value = prevTotal;
