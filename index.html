@@ -2048,6 +2048,7 @@ async function deactivateStaff() {
   const sel  = document.getElementById('deactivateStaff');
   const id   = parseInt(sel.value);
   const name = sel.options[sel.selectedIndex].text;
+  const msg  = document.getElementById('deactivateMsg');
   if (!confirm('Deactivate ' + name + '? Their payments stay in the totals.')) return;
   showAdminMsg(msg, 'Updating...', '#a0bedd');
   const { error } = await db.from('staff').update({ is_active: false }).eq('id', id);
