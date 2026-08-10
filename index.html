@@ -727,6 +727,7 @@ async function computeTotalCollected() {
 // ── App state ─────────────────────────────────────────────────
 let MONTHS = [], STAFF = [], GLICO_PAID = [], MONTHLY_TOTALS = [];
 let TOTAL_COLLECTED = 0, CURRENT_IDX = 0, DUE_MONTHS = 0;
+let RECON_DRIFT = 0; // difference between raw payments-table sum and reconciled total; 0 = healthy
 let INACTIVE_TOTAL = 0; // payments from inactive staff (always included in totals)
 let PERIOD_ID = 1;
 let IS_ADMIN = false;
@@ -878,6 +879,13 @@ async function loadData() {
 
     // TOTAL_COLLECTED = base_balance + cash recorded since base_balance_date (matches daily report)
     TOTAL_COLLECTED = await computeTotalCollected();
+
+    // Drift check: SUM(payments.amount) should equal TOTAL_COLLECTED. A gap here
+    // means a payment's cumulative amount and its payment_history trail have
+    // fallen out of sync (e.g. a top-up on a row whose received_date predates
+    // tracking) — surfaced to admins on the dashboard rather than found by hand.
+    const rawSum = paymentRows.reduce((s, p) => s + (p.amount || 0), 0);
+    RECON_DRIFT = rawSum - TOTAL_COLLECTED;
 
     // Fetch Glico payments
     const { data: glico } = await db.from('glico_payments').select('*').eq('period_id', PERIOD_ID).order('paid_date');
@@ -1091,7 +1099,16 @@ function renderDash() {
   const upPct = Math.round((S.upToDate + S.aheadCount) / S.total * 100);
   const maxBar = Math.max(...MONTHLY_TOTALS);
 
-  let html = `
+  let html = '';
+  if (IS_ADMIN && Math.abs(RECON_DRIFT) > 0) {
+    html += `
+  <div style="background:#3a2a0f;border:1px solid #7a5a1a;border-radius:10px;padding:12px 14px;margin-bottom:14px;color:#ffcf70;font-size:12px">
+    ⚠ Reconciliation drift detected: totals differ by ¢${Math.abs(RECON_DRIFT).toLocaleString()}
+    (payments table sum vs. base-balance calculation). This usually means a top-up landed on a
+    row whose value predates tracking. Worth a manual check.
+  </div>`;
+  }
+  html += `
   <!-- summary cards -->
   <div class="summary-grid">
     <div class="summary-card green">
@@ -1532,7 +1549,9 @@ async function saveChanges() {
 
   const amtStr   = document.getElementById('lumpAmount').value;
   const note     = document.getElementById('paymentNote').value || '';
-  const dateRcvd = document.getElementById('paymentDateReceived').value || '';
+  // Never allow an empty received_date — it would make this payment invisible
+  // to every date-filtered total (dashboard, daily report). Fall back to today.
+  const dateRcvd = document.getElementById('paymentDateReceived').value || new Date().toISOString().slice(0,10);
   const lump     = parseInt(amtStr);
 
   if (!lump || lump <= 0) { alert('Please enter a valid amount.'); return; }
