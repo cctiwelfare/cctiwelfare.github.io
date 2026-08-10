@@ -705,6 +705,25 @@ async function fetchAllRows(table, periodId) {
   return allRows;
 }
 
+// ── Correct total-collected calculation ──────────────────────────
+// Total = base_balance (reconciled opening balance) + all new/topup cash
+// recorded in payment_history since base_balance_date. This matches the
+// daily payments report and avoids double-counting top-up portions that
+// straddle the base_balance_date (which a raw SUM(payments.amount) does).
+async function computeTotalCollected() {
+  const baseBalance     = parseFloat((window._settings && window._settings['base_balance']) || '0');
+  const baseBalanceDate = (window._settings && window._settings['base_balance_date']) || '2026-07-18';
+  const { data: rows, error } = await db.from('payment_history')
+    .select('amount_change')
+    .eq('period_id', PERIOD_ID)
+    .or('action.eq.new,action.eq.topup')
+    .eq('is_voided', false)
+    .gte('received_date', baseBalanceDate);
+  if (error) { console.error('computeTotalCollected error:', error); return baseBalance; }
+  const sinceBase = (rows || []).reduce((s, r) => s + (r.amount_change || 0), 0);
+  return baseBalance + sinceBase;
+}
+
 // ── App state ─────────────────────────────────────────────────
 let MONTHS = [], STAFF = [], GLICO_PAID = [], MONTHLY_TOTALS = [];
 let TOTAL_COLLECTED = 0, CURRENT_IDX = 0, DUE_MONTHS = 0;
@@ -842,6 +861,12 @@ async function loadData() {
     const { data: allStaffRows } = await db.from('staff').select('id').eq('is_active', false);
     const inactiveIds = new Set((allStaffRows || []).map(s => s.id));
 
+    // Load settings first (needed for correct total-collected calc)
+    const { data: settingsRows } = await db.from('settings').select('*');
+    if (settingsRows) {
+      settingsRows.forEach(s => { window._settings = window._settings || {}; window._settings[s.key] = s.value; });
+    }
+
     // INACTIVE_TOTAL: sum of payments from inactive staff (preserved across saves)
     INACTIVE_TOTAL = paymentRows
       .filter(p => inactiveIds.has(p.staff_id))
@@ -851,19 +876,14 @@ async function loadData() {
     MONTHLY_TOTALS = new Array(MONTHS.length).fill(0);
     STAFF.forEach(([,,,p]) => p.forEach((v,i) => { if (v) MONTHLY_TOTALS[i] += v; }));
 
-    // TOTAL_COLLECTED = active + inactive contributions
-    TOTAL_COLLECTED = MONTHLY_TOTALS.reduce((a,b) => a+b, 0) + INACTIVE_TOTAL;
+    // TOTAL_COLLECTED = base_balance + cash recorded since base_balance_date (matches daily report)
+    TOTAL_COLLECTED = await computeTotalCollected();
 
     // Fetch Glico payments
     const { data: glico } = await db.from('glico_payments').select('*').eq('period_id', PERIOD_ID).order('paid_date');
     GLICO_PAID = glico.map(g => ({ label: g.label, amount: g.amount }));
 
     clearTimeout(timeout);
-    // Load settings
-    const { data: settingsRows } = await db.from('settings').select('*');
-    if (settingsRows) {
-      settingsRows.forEach(s => { window._settings = window._settings || {}; window._settings[s.key] = s.value; });
-    }
     // Override CURRENT_IDX if arrears_month_idx is set in settings
     if (window._settings && window._settings['arrears_month_idx'] !== undefined) {
       const overrideIdx = parseInt(window._settings['arrears_month_idx']);
@@ -943,7 +963,7 @@ async function savePaymentToDb(staffDbId, staffName, monthIdx, amount, note, dat
     // Recalculate totals — always add INACTIVE_TOTAL for accuracy
     MONTHLY_TOTALS = new Array(MONTHS.length).fill(0);
     STAFF.forEach(([,,,p]) => p.forEach((v,i) => { if (v) MONTHLY_TOTALS[i] += v; }));
-    TOTAL_COLLECTED = MONTHLY_TOTALS.reduce((a,b) => a+b, 0) + INACTIVE_TOTAL;
+    TOTAL_COLLECTED = await computeTotalCollected();
     setTimeout(() => {
       saveBtn.textContent = 'Save Payment';
       saveBtn.style.background = '';
@@ -1614,7 +1634,7 @@ async function saveChanges() {
     // Recalculate totals
     MONTHLY_TOTALS = new Array(MONTHS.length).fill(0);
     STAFF.forEach(([,,,p]) => p.forEach((v,i) => { if (v) MONTHLY_TOTALS[i] += v; }));
-    TOTAL_COLLECTED = MONTHLY_TOTALS.reduce((a,b) => a+b, 0) + INACTIVE_TOTAL;
+    TOTAL_COLLECTED = await computeTotalCollected();
 
     // Refresh card
     showCard(STAFF[staffIdx], staffIdx);
@@ -1792,7 +1812,7 @@ async function exportExcel() {
 
     // ── Reconciliation ───────────────────────────────────────────
     ws.addRow([]); ws.addRow([]);
-    const totalCollected = allPayments.reduce((s,p) => s+(p.amount||0), 0);
+    const totalCollected = await computeTotalCollected();
     const totalGlico     = (glico||[]).reduce((s,p) => s+p.amount, 0);
     const balance        = totalCollected - totalGlico;
     const recolCol       = lastCol - 4;
@@ -2289,7 +2309,7 @@ async function voidTransaction(txnId) {
   // Recalculate totals
   MONTHLY_TOTALS = new Array(MONTHS.length).fill(0);
   STAFF.forEach(([,,,p]) => p.forEach((v,i) => { if (v) MONTHLY_TOTALS[i] += v; }));
-  TOTAL_COLLECTED = MONTHLY_TOTALS.reduce((a,b) => a+b, 0) + INACTIVE_TOTAL;
+  TOTAL_COLLECTED = await computeTotalCollected();
 
   showToast('Transaction voided. Re-enter the correct amount.', '#5fdb80');
   loadLedger();
