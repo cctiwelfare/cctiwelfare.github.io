@@ -1948,6 +1948,7 @@ async function setupAdminPanel() {
     ).join('');
     loadStaffForEdit(); // prefill with first staff
   }
+  setNextMonthDefaults();
 
   const countEl = document.getElementById('currentMonthCount');
   if (countEl) countEl.textContent = MONTHS.length + ' months (' + MONTHS[0] + ' to ' + MONTHS[MONTHS.length-1] + ')';
@@ -2026,6 +2027,23 @@ async function addStaff() {
   document.getElementById('newStaffPhone').value = '';
 }
 
+function nextMonthLabel() {
+  const ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const last = MONTHS[MONTHS.length - 1];
+  const lm = ABBR.findIndex(a => a.toLowerCase() === last.trim().substring(0,3).toLowerCase());
+  const ly = parseInt(last.slice(-2));
+  if (lm < 0 || isNaN(ly)) return null;
+  const nm = (lm + 1) % 12, ny = lm === 11 ? ly + 1 : ly;
+  const yy = String(ny).padStart(2, '0');
+  return { name: ABBR[nm], year: yy, label: ABBR[nm] + " '" + yy };
+}
+function setNextMonthDefaults() {
+  const nxt = nextMonthLabel(); if (!nxt) return;
+  const n = document.getElementById('newMonthName'), y = document.getElementById('newMonthYear');
+  if (n) n.value = nxt.name;
+  if (y) y.value = nxt.year;
+}
+
 async function addMonth() {
   const monthName = document.getElementById('newMonthName').value;
   const year      = document.getElementById('newMonthYear').value.trim();
@@ -2033,11 +2051,15 @@ async function addMonth() {
   if (!year || year.length !== 2 || isNaN(year)) { showAdminMsg(msg, 'Enter 2-digit year e.g. 27', '#ff8080'); return; }
   const label = monthName + " '" + year;
   if (MONTHS.includes(label)) { showAdminMsg(msg, label + ' already exists.', '#ff8080'); return; }
+  // Months are positional (payments point at a month by its index), so they must be added in order.
+  const nxt = nextMonthLabel();
+  if (nxt && label !== nxt.label) { showAdminMsg(msg, 'Months must be added in order. The next month to add is ' + nxt.label + '.', '#ff8080'); return; }
   showAdminMsg(msg, 'Adding...', '#a0bedd');
   const { error } = await db.from('periods').update({ months: [...MONTHS, label] }).eq('id', PERIOD_ID);
   if (error) { showAdminMsg(msg, 'Error: ' + error.message, '#ff8080'); return; }
   MONTHS.push(label);
   MONTHLY_TOTALS.push(0);
+  setNextMonthDefaults();
   showAdminMsg(msg, label + ' added! Refresh to activate it.', '#5fdb80');
   const countEl = document.getElementById('currentMonthCount');
   if (countEl) countEl.textContent = MONTHS.length + ' months (' + MONTHS[0] + ' to ' + MONTHS[MONTHS.length-1] + ')';
