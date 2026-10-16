@@ -843,9 +843,16 @@ async function loadData() {
     // Build STAFF array: [no, name, dept, payments[]]
     // Number serially by sort order
     STAFF = staffRows.map((s, i) => {
+      const jm = s.joined_month || 0;
+      const hasRows = payMap[s.id] && Object.keys(payMap[s.id]).length > 0;
       const payments = MONTHS.map((_, i) => {
-        if (i < s.joined_month) return null; // pre-membership
-        return payMap[s.id] && payMap[s.id][i] !== undefined ? payMap[s.id][i] : null;
+        if (i < jm) return null; // pre-membership
+        if (payMap[s.id] && payMap[s.id][i] !== undefined) return payMap[s.id][i];
+        // Brand-new member with no payment rows yet: the join month is marked 0 (due, unpaid)
+        // so every join-month check (first non-null month) finds it. Without this, all months
+        // were null, the join month couldn't be found, and the whole card was un-editable.
+        if (!hasRows && i === jm) return 0;
+        return null;
       });
       return [String(i + 1), s.name, s.department, payments, s.id];
     });
@@ -1884,7 +1891,11 @@ async function setupAdminPanel() {
   const today = new Date().toISOString().slice(0,10);
 
   const joinedSel = document.getElementById('newStaffJoined');
-  if (joinedSel) joinedSel.innerHTML = MONTHS.map((m,i) => '<option value="'+i+'">'+m+'</option>').join('');
+  if (joinedSel) {
+    joinedSel.innerHTML = MONTHS.map((m,i) => '<option value="'+i+'">'+m+'</option>').join('');
+    // Default to the current month so a new member's arrears start from when they actually join
+    joinedSel.value = String(Math.min(Math.max(DUE_MONTHS - 1, 0), MONTHS.length - 1));
+  }
 
   const deactSel = document.getElementById('deactivateStaff');
   if (deactSel) deactSel.innerHTML = STAFF.map(s =>
