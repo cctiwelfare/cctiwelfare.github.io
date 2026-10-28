@@ -531,6 +531,10 @@ footer { color: #1e3d6b; font-size: 11px; text-align: center; padding: 16px; mar
         <label style="color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:6px">Staff Member</label>
         <select id="deactivateStaff" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:14px;outline:none"></select>
       </div>
+      <div style="margin-bottom:14px">
+        <label style="color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;display:block;margin-bottom:6px">Date of Deactivation</label>
+        <input type="date" id="deactivateDate" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:14px;outline:none;box-sizing:border-box">
+      </div>
       <button onclick="deactivateStaff()" style="width:100%;padding:12px;background:#dc3545;border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:700;cursor:pointer">Deactivate Staff Member</button>
       <div id="deactivateMsg" style="margin-top:8px;font-size:12px;text-align:center;display:none"></div>
     </div>
@@ -643,6 +647,10 @@ footer { color: #1e3d6b; font-size: 11px; text-align: center; padding: 16px; mar
       <div style="margin-bottom:14px">
         <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">Joining Month</label>
         <select id="editStaffJoined" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:14px;outline:none"></select>
+      </div>
+      <div id="editDeactWrap" style="display:none;margin-bottom:14px">
+        <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">Date of Deactivation</label>
+        <input type="date" id="editStaffDeactivated" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:14px;outline:none;box-sizing:border-box">
       </div>
       <button onclick="saveStaffEdit()" style="width:100%;padding:12px;background:#2e75b6;border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:700;cursor:pointer">Save Changes</button>
       <div id="editStaffMsg" style="margin-top:8px;font-size:12px;text-align:center;display:none"></div>
@@ -775,6 +783,9 @@ function refreshOpenCard() {
   const j = INACTIVE_STAFF.findIndex(s => s[1] === nm);
   if (j > -1) showCard(INACTIVE_STAFF[j], j, true);
 }
+function fmtDate(d) {
+  return new Date(String(d).slice(0, 10) + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+}
 function statusTag(inactive) {
   return inactive
     ? '<span class="status-tag tag-inactive">Inactive</span>'
@@ -878,7 +889,7 @@ async function loadData() {
         if (i < jm) return null;
         return payMap[r.id] && payMap[r.id][i] !== undefined ? payMap[r.id][i] : null;
       });
-      return ['\u2014', r.name, r.department, payments, r.id];
+      return ['\u2014', r.name, r.department, payments, r.id, r.deactivated_at ? String(r.deactivated_at).slice(0, 10) : null];
     });
 
     // Sort staffRows by staff_no to match Excel order
@@ -1371,7 +1382,7 @@ function buildStatusBar(payments, joinIdx) {
   }
 }
 
-function showCard([num, name, dept, payments, dbId], staffIdx, inactive = false) {
+function showCard([num, name, dept, payments, dbId, deactivatedAt], staffIdx, inactive = false) {
   let joinIdx = payments.findIndex(v => v !== null);
   if (inactive && joinIdx === -1) joinIdx = payments.length; // never paid: every month shows n/a
   const canEdit = IS_ADMIN && !inactive; // deactivated staff are read-only
@@ -1411,7 +1422,7 @@ function showCard([num, name, dept, payments, dbId], staffIdx, inactive = false)
         <span class="total-label">Total Paid</span>
         <span class="total-amount" id="cardTotal">¢${total.toLocaleString()}</span>
       </div>
-${inactive ? '<div class="status-bar" style="background:#f3f3f3;color:#777;border-top-color:#ddd">Deactivated from Glico welfare</div>' : buildStatusBar(payments, joinIdx)}
+${inactive ? '<div class="status-bar" style="background:#f3f3f3;color:#777;border-top-color:#ddd">' + (deactivatedAt ? 'Deactivated on ' + fmtDate(deactivatedAt) : 'Deactivated from Glico welfare') + '</div>' : buildStatusBar(payments, joinIdx)}
       <div id="lastPaymentInfo" style="font-size:11px;color:#6a8ab5;text-align:center;padding:4px 0"></div>
       <div class="save-bar" id="saveBar">
         <div id="monthHint" style="font-size:11px;color:#276c3a;margin-bottom:8px;font-weight:600"></div>
@@ -1451,6 +1462,7 @@ ${inactive ? '<div class="status-bar" style="background:#f3f3f3;color:#777;borde
     .order('created_at', { ascending: false })
     .then(({ data: hist }) => {
       const el = document.getElementById('lastPaymentInfo');
+      // Only show a last payment when a dated record exists
       if (!el || !hist || hist.length === 0) return;
       // Group by transaction_id to get most recent transaction total
       const txnTotals = {};
@@ -1919,6 +1931,8 @@ async function exportExcel() {
 async function setupAdminPanel() {
   // Set today first — used throughout
   const today = new Date().toISOString().slice(0,10);
+  const deactDateEl = document.getElementById('deactivateDate');
+  if (deactDateEl) deactDateEl.value = today;
 
   const joinedSel = document.getElementById('newStaffJoined');
   if (joinedSel) {
@@ -2133,9 +2147,16 @@ async function deactivateStaff() {
   const msg  = document.getElementById('deactivateMsg');
   if (!confirm('Deactivate ' + name + '? Their payments stay in the totals.')) return;
   showAdminMsg(msg, 'Updating...', '#a0bedd');
-  const { error } = await db.from('staff').update({ is_active: false }).eq('id', id);
+  const dDate = (document.getElementById('deactivateDate') || {}).value || new Date().toISOString().slice(0, 10);
+  let { error } = await db.from('staff').update({ is_active: false, deactivated_at: dDate }).eq('id', id);
+  let dateNote = '';
+  if (error && /deactivated_at/.test(error.message)) {
+    // column not created yet: still deactivate, just without the date
+    ({ error } = await db.from('staff').update({ is_active: false }).eq('id', id));
+    dateNote = ' (date not saved: add the deactivated_at column first)';
+  }
   if (error) { showAdminMsg(msg, 'Error: ' + error.message, '#ff8080'); return; }
-  showAdminMsg(msg, name + ' deactivated. Refresh to update.', '#5fdb80');
+  showAdminMsg(msg, name + ' deactivated' + dateNote + '. Refresh to update.', '#5fdb80');
   sel.remove(sel.selectedIndex);
 }
 
@@ -2724,7 +2745,10 @@ async function reactivateStaffMember() {
   if (!reactOk) return;
 
   showAdminMsg(msg, 'Updating...', '#a0bedd');
-  const { error } = await db.from('staff').update({ is_active: true }).eq('id', id);
+  let { error } = await db.from('staff').update({ is_active: true, deactivated_at: null }).eq('id', id);
+  if (error && /deactivated_at/.test(error.message)) {
+    ({ error } = await db.from('staff').update({ is_active: true }).eq('id', id));
+  }
   if (error) { showAdminMsg(msg, 'Error: ' + error.message, '#ff8080'); return; }
 
   showAdminMsg(msg, name + ' reactivated. Refresh to update the list.', '#5fdb80');
@@ -2771,6 +2795,12 @@ function loadStaffForEdit() {
     const joinedSel = document.getElementById('editStaffJoined');
     if (joinedSel) joinedSel.value = r.joined_month || 0;
   }
+  const dw = document.getElementById('editDeactWrap'), di = document.getElementById('editStaffDeactivated');
+  if (dw && di) {
+    const isInactive = !s && r && !r.is_active;
+    dw.style.display = isInactive ? 'block' : 'none';
+    di.value = isInactive && r.deactivated_at ? String(r.deactivated_at).slice(0, 10) : '';
+  }
 }
 
 async function saveStaffEdit() {
@@ -2785,11 +2815,24 @@ async function saveStaffEdit() {
   if (!name || !dept) { showAdminMsg(msg, 'Name and department are required.', '#ff8080'); return; }
 
   showAdminMsg(msg, 'Saving...', '#a0bedd');
-  const { error } = await db.from('staff')
-    .update({ name, department: dept, joined_month: joined, phone })
-    .eq('id', id);
-
+  const row        = (window._allStaffRows || []).find(r => r.id === id);
+  const isInactive = !!(row && !row.is_active);
+  const deactVal   = (document.getElementById('editStaffDeactivated') || {}).value || null;
+  const payload    = { name, department: dept, joined_month: joined, phone };
+  if (isInactive) payload.deactivated_at = deactVal;
+  let { error } = await db.from('staff').update(payload).eq('id', id);
+  let dateNote = '';
+  if (error && /deactivated_at/.test(error.message)) {
+    delete payload.deactivated_at;
+    ({ error } = await db.from('staff').update(payload).eq('id', id));
+    dateNote = ' (deactivation date not saved: add the deactivated_at column first)';
+  }
   if (error) { showAdminMsg(msg, 'Error: ' + error.message, '#ff8080'); return; }
+  if (isInactive && !dateNote) {
+    row.deactivated_at = deactVal;
+    const ii = INACTIVE_STAFF.findIndex(x => x[4] === id);
+    if (ii > -1) { INACTIVE_STAFF[ii][1] = name; INACTIVE_STAFF[ii][2] = dept; INACTIVE_STAFF[ii][5] = deactVal; }
+  }
 
   // Update local STAFF array
   const idx = STAFF.findIndex(s => s[4] === id);
@@ -2798,7 +2841,7 @@ async function saveStaffEdit() {
   // Update dropdown
   sel.options[sel.selectedIndex].text = name + ' (' + dept + ')';
 
-  showAdminMsg(msg, 'Saved successfully!', '#5fdb80');
+  showAdminMsg(msg, 'Saved successfully!' + dateNote, dateNote ? '#ffc107' : '#5fdb80');
 }
 
 // Start
