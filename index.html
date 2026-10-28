@@ -626,6 +626,7 @@ footer { color: #1e3d6b; font-size: 11px; text-align: center; padding: 16px; mar
     <div class="section-head">Deactivated Staff <span id="deactCount" style="color:#5b7fa3;font-weight:400;text-transform:none;letter-spacing:0"></span></div>
     <div style="background:#162d55;border-radius:12px;padding:16px;margin-bottom:16px">
       <div id="deactList" style="font-size:12px"></div>
+      <button onclick="downloadDeactivatedList()" style="width:100%;margin-top:14px;padding:12px;background:#2e75b6;border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:700;cursor:pointer">&#11015; Download Deactivated List</button>
     </div>
 
     <!-- Reactivate Staff -->
@@ -2886,6 +2887,41 @@ function renderDeactivatedList() {
       + '<div style="text-align:right;color:#a0bedd;font-size:11px">Total paid<br><span style="color:#5fdb80;font-weight:700;font-size:13px">GH&#x20B5;' + total.toLocaleString() + '</span></div>'
       + '</div>';
   }).join('');
+}
+
+function downloadDeactivatedList() {
+  if (!INACTIVE_STAFF.length) { showToast('No deactivated staff to export.', '#ffc107'); return; }
+  const lines = [];
+  const todayLabel = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  lines.push('CCTI Staff Welfare Association');
+  lines.push('Staff deactivated from Glico/Welfare as at ' + todayLabel);
+  lines.push('='.repeat(50));
+  lines.push('');
+
+  const byDept = {};
+  INACTIVE_STAFF.forEach(r => { (byDept[r[2]] = byDept[r[2]] || []).push(r); });
+
+  let serial = 1;
+  Object.keys(byDept).sort((a, b) => String(a).localeCompare(String(b))).forEach(dept => {
+    lines.push(String(dept).toUpperCase());
+    lines.push('-'.repeat(30));
+    byDept[dept].sort((a, b) => String(a[1]).localeCompare(String(b[1]))).forEach(r => {
+      const total = r[3].reduce((sum, v) => sum + (v || 0), 0);
+      const when  = r[5] ? 'Deactivated ' + fmtDate(r[5]) : 'Deactivation date not recorded';
+      lines.push(serial + '. ' + r[1] + ' \u2014 ' + when + ' \u2014 Total paid GH\u20B5' + total.toLocaleString());
+      serial++;
+    });
+    lines.push('');
+  });
+
+  lines.push('='.repeat(50));
+  lines.push('Total deactivated staff: ' + INACTIVE_STAFF.length);
+
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'CCTI_Deactivated_Staff_' + new Date().toISOString().slice(0, 10) + '.txt';
+  a.click();
 }
 
 // ── Staff Statements PDF (one block per staff member, grouped by department) ──
