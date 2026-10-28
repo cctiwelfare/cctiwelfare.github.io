@@ -622,6 +622,12 @@ footer { color: #1e3d6b; font-size: 11px; text-align: center; padding: 16px; mar
       <div id="pdfMsg" style="margin-top:8px;font-size:12px;text-align:center;display:none"></div>
     </div>
 
+    <!-- Deactivated Staff List -->
+    <div class="section-head">Deactivated Staff <span id="deactCount" style="color:#5b7fa3;font-weight:400;text-transform:none;letter-spacing:0"></span></div>
+    <div style="background:#162d55;border-radius:12px;padding:16px;margin-bottom:16px">
+      <div id="deactList" style="font-size:12px"></div>
+    </div>
+
     <!-- Reactivate Staff -->
     <div class="section-head">Reactivate Staff</div>
     <div style="background:#162d55;border-radius:12px;padding:16px;margin-bottom:16px">
@@ -2002,6 +2008,7 @@ async function setupAdminPanel() {
     loadStaffForEdit(); // prefill with first staff
   }
   setNextMonthDefaults();
+  renderDeactivatedList();
 
   const countEl = document.getElementById('currentMonthCount');
   if (countEl) countEl.textContent = MONTHS.length + ' months (' + MONTHS[0] + ' to ' + MONTHS[MONTHS.length-1] + ')';
@@ -2850,7 +2857,35 @@ async function saveStaffEdit() {
   // Update dropdown
   sel.options[sel.selectedIndex].text = name + ' (' + dept + ')';
 
+  renderDeactivatedList();
   showAdminMsg(msg, 'Saved successfully!' + dateNote, dateNote ? '#ffc107' : '#5fdb80');
+}
+
+// ── Deactivated staff list (Admin) ──
+function renderDeactivatedList() {
+  const el = document.getElementById('deactList');
+  if (!el) return;
+  const esc = t => String(t == null ? '' : t).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  // most recently deactivated first; people with no recorded date last
+  const list = [...INACTIVE_STAFF].sort((a, b) => {
+    const da = a[5] || '', dbb = b[5] || '';
+    if (da === dbb) return String(a[1]).localeCompare(String(b[1]));
+    if (!da) return 1;
+    if (!dbb) return -1;
+    return dbb.localeCompare(da);
+  });
+  const countEl = document.getElementById('deactCount');
+  if (countEl) countEl.textContent = '(' + list.length + ')';
+  if (!list.length) { el.innerHTML = '<div style="color:#a0bedd;text-align:center;padding:6px">No deactivated staff.</div>'; return; }
+  el.innerHTML = list.map(r => {
+    const total = r[3].reduce((sum, v) => sum + (v || 0), 0);
+    const when  = r[5] ? 'Deactivated ' + fmtDate(r[5]) : 'Date not recorded';
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #1e3d6b">'
+      + '<div><div style="color:#fff;font-weight:600;font-size:13px">' + esc(r[1]) + '</div>'
+      + '<div style="color:#7eb3e8;font-size:11px;margin-top:2px">' + esc(r[2]) + ' \u00b7 ' + when + '</div></div>'
+      + '<div style="text-align:right;color:#a0bedd;font-size:11px">Total paid<br><span style="color:#5fdb80;font-weight:700;font-size:13px">GH&#x20B5;' + total.toLocaleString() + '</span></div>'
+      + '</div>';
+  }).join('');
 }
 
 // ── Staff Statements PDF (one block per staff member, grouped by department) ──
