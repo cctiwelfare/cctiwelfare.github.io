@@ -352,6 +352,9 @@ footer { color: #1e3d6b; font-size: 11px; text-align: center; padding: 16px; mar
 .month-row.editable:hover { filter: brightness(.95); }
 .month-input { width: 60px; padding: 2px 6px; border-radius: 6px; border: 2px solid #2e75b6; background: #fff; font-size: 13px; font-weight: 700; color: #276c3a; text-align: center; outline: none; }
 .edit-hint { font-size: 10px; color: #888; text-align: center; padding: 5px; background: #f5f8ff; border-top: 1px solid #dde; }
+.status-tag { display:inline-block; font-size:10px; font-weight:700; padding:2px 8px; border-radius:10px; letter-spacing:.5px; text-transform:uppercase; margin-left:6px; vertical-align:middle; }
+.tag-active   { background:#d4edda; color:#276c3a; }
+.tag-inactive { background:#ffe0e0; color:#a32020; }
 </style>
 </head>
 <body>
@@ -726,6 +729,7 @@ async function computeTotalCollected() {
 
 // ── App state ─────────────────────────────────────────────────
 let MONTHS = [], STAFF = [], GLICO_PAID = [], MONTHLY_TOTALS = [];
+let INACTIVE_STAFF = []; // deactivated staff: searchable on My Record, read-only, kept out of STAFF so stats/arrears/SMS are unaffected
 let TOTAL_COLLECTED = 0, CURRENT_IDX = 0, DUE_MONTHS = 0;
 let RECON_DRIFT = 0; // difference between raw payments-table sum and reconciled total; 0 = healthy
 let INACTIVE_TOTAL = 0; // payments from inactive staff (always included in totals)
@@ -757,14 +761,24 @@ async function doLogin() {
   closeLogin();
   setAdminMode(true, email);
   // Refresh current card if open
-  const idx = STAFF.findIndex(s => s[1] === document.getElementById('searchInput').value);
-  if (idx > -1) showCard(STAFF[idx], idx);
+  refreshOpenCard();
 }
 async function doLogout() {
   await db.auth.signOut();
   setAdminMode(false, '');
-  const idx = STAFF.findIndex(s => s[1] === document.getElementById('searchInput').value);
-  if (idx > -1) showCard(STAFF[idx], idx);
+  refreshOpenCard();
+}
+function refreshOpenCard() {
+  const nm = document.getElementById('searchInput').value;
+  const i = STAFF.findIndex(s => s[1] === nm);
+  if (i > -1) { showCard(STAFF[i], i); return; }
+  const j = INACTIVE_STAFF.findIndex(s => s[1] === nm);
+  if (j > -1) showCard(INACTIVE_STAFF[j], j, true);
+}
+function statusTag(inactive) {
+  return inactive
+    ? '<span class="status-tag tag-inactive">Inactive</span>'
+    : '<span class="status-tag tag-active">Active</span>';
 }
 function setAdminMode(on, email) {
   IS_ADMIN = on;
@@ -855,6 +869,16 @@ async function loadData() {
         return null;
       });
       return [String(i + 1), s.name, s.department, payments, s.id];
+    });
+
+    // Deactivated staff (same shape as STAFF), for lookup only
+    INACTIVE_STAFF = (fullStaffRows || []).filter(r => !r.is_active).map(r => {
+      const jm = r.joined_month || 0;
+      const payments = MONTHS.map((_, i) => {
+        if (i < jm) return null;
+        return payMap[r.id] && payMap[r.id][i] !== undefined ? payMap[r.id][i] : null;
+      });
+      return ['\u2014', r.name, r.department, payments, r.id];
     });
 
     // Sort staffRows by staff_no to match Excel order
@@ -1248,15 +1272,19 @@ input.addEventListener('input', () => {
   prompt.style.display = q ? 'none' : 'block';
   if (!q) { suggestBox.innerHTML=''; suggestBox.classList.remove('visible'); return; }
 
-  const matches = STAFF.filter(s => s[1].toLowerCase().includes(q)).slice(0, 6);
+  const all = [
+    ...STAFF.map((s, i) => ({ s, i, inactive: false })),
+    ...INACTIVE_STAFF.map((s, i) => ({ s, i, inactive: true }))
+  ];
+  const matches = all.filter(m => m.s[1].toLowerCase().includes(q)).slice(0, 8);
   if (!matches.length) {
     suggestBox.innerHTML=''; suggestBox.classList.remove('visible');
     emptyState.classList.add('visible'); return;
   }
-  suggestBox.innerHTML = matches.map(s =>
-    `<div class="suggestion-item" data-idx="${STAFF.indexOf(s)}" onmousedown="selectStaff(${STAFF.indexOf(s)})">
-      <span>${highlight(s[1], q)}</span>
-      <span class="suggestion-dept">${s[2]}</span>
+  suggestBox.innerHTML = matches.map(m =>
+    `<div class="suggestion-item" onmousedown="selectStaff(${m.i}, ${m.inactive})">
+      <span>${highlight(m.s[1], q)}</span>
+      <span><span class="suggestion-dept">${m.s[2]}</span>${statusTag(m.inactive)}</span>
     </div>`).join('');
   suggestBox.classList.add('visible');
   activeIdx = -1;
@@ -1277,13 +1305,13 @@ function highlight(name, q) {
   return name.replace(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi'),
     '<b style="color:#fff">$1</b>');
 }
-function selectStaff(idx) {
-  const s = STAFF[idx];
+function selectStaff(idx, inactive) {
+  const s = inactive ? INACTIVE_STAFF[idx] : STAFF[idx];
   input.value = s[1];
   suggestBox.innerHTML=''; suggestBox.classList.remove('visible');
   prompt.style.display = 'none';
   emptyState.classList.remove('visible');
-  showCard(s, idx);
+  showCard(s, idx, !!inactive);
 }
 function clearSearch() {
   input.value='';
@@ -1343,9 +1371,11 @@ function buildStatusBar(payments, joinIdx) {
   }
 }
 
-function showCard([num, name, dept, payments], staffIdx) {
-  const joinIdx = payments.findIndex(v => v !== null);
-  const joinNote = joinIdx > 0 ? ` · Joined ${MONTHS[joinIdx]}` : '';
+function showCard([num, name, dept, payments, dbId], staffIdx, inactive = false) {
+  let joinIdx = payments.findIndex(v => v !== null);
+  if (inactive && joinIdx === -1) joinIdx = payments.length; // never paid: every month shows n/a
+  const canEdit = IS_ADMIN && !inactive; // deactivated staff are read-only
+  const joinNote = joinIdx > 0 && joinIdx < MONTHS.length ? ` · Joined ${MONTHS[joinIdx]}` : '';
   const monthsHTML = (() => {
     // Find oldest unpaid/partial month - only this is editable for admin
     let firstUnpaidIdx = -1;
@@ -1357,9 +1387,9 @@ function showCard([num, name, dept, payments], staffIdx) {
     return payments.map((val, i) => {
       let cls, badge;
       if (i < joinIdx)       { cls = 'pre-member'; badge = 'n/a'; }
-      else if (val === null) { cls = (IS_ADMIN && i === firstUnpaidIdx) ? 'unpaid editable' : 'unpaid'; badge = '—'; }
-      else if (val === 0)    { cls = (IS_ADMIN && i === firstUnpaidIdx) ? 'arrears editable' : 'arrears'; badge = '0'; }
-      else if (val < 40)     { cls = (IS_ADMIN && i === firstUnpaidIdx) ? 'partial editable' : 'partial'; badge = `¢${val} / 40`; }
+      else if (val === null) { cls = (canEdit && i === firstUnpaidIdx) ? 'unpaid editable' : 'unpaid'; badge = '—'; }
+      else if (val === 0)    { cls = (canEdit && i === firstUnpaidIdx) ? 'arrears editable' : 'arrears'; badge = '0'; }
+      else if (val < 40)     { cls = (canEdit && i === firstUnpaidIdx) ? 'partial editable' : 'partial'; badge = `¢${val} / 40`; }
       else                   { cls = 'paid'; badge = `¢${val}`; }
       return `<div class="month-row ${cls}" data-month="${i}" data-staff="${staffIdx}">
       <span class="month-name">${MONTHS[i]}</span>
@@ -1371,17 +1401,17 @@ function showCard([num, name, dept, payments], staffIdx) {
   resultBox.innerHTML = `
     <div class="card">
       <div class="card-header">
-        <div class="card-number">Staff No. ${num}</div>
+        <div class="card-number">${inactive ? 'Deactivated from Glico welfare' : 'Staff No. ' + num}</div>
         <div class="card-name">${name}</div>
-        <span class="card-dept">${dept}${joinNote}</span>
+        <span class="card-dept">${dept}${joinNote}</span>${statusTag(inactive)}
       </div>
       <div class="months-grid">${monthsHTML}</div>
-      ${IS_ADMIN ? '<div class="edit-hint">Tap an unpaid or partial month to enter a payment</div>' : ''}
+      ${canEdit ? '<div class="edit-hint">Tap an unpaid or partial month to enter a payment</div>' : ''}
       <div class="total-bar">
         <span class="total-label">Total Paid</span>
         <span class="total-amount" id="cardTotal">¢${total.toLocaleString()}</span>
       </div>
-${buildStatusBar(payments, joinIdx)}
+${inactive ? '<div class="status-bar" style="background:#f3f3f3;color:#777;border-top-color:#ddd">Deactivated from Glico welfare</div>' : buildStatusBar(payments, joinIdx)}
       <div id="lastPaymentInfo" style="font-size:11px;color:#6a8ab5;text-align:center;padding:4px 0"></div>
       <div class="save-bar" id="saveBar">
         <div id="monthHint" style="font-size:11px;color:#276c3a;margin-bottom:8px;font-weight:600"></div>
@@ -1410,7 +1440,7 @@ ${buildStatusBar(payments, joinIdx)}
   });
 
   // Fetch last payment from payment_history
-  const staffDbId = STAFF[staffIdx][4];
+  const staffDbId = dbId;
   db.from('payment_history')
     .select('transaction_id, amount_change, created_at, received_date')
     .eq('staff_id', staffDbId)
