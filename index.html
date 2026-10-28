@@ -6,6 +6,7 @@
 <title>CCTI Welfare – Glico Contributions</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -611,6 +612,14 @@ footer { color: #1e3d6b; font-size: 11px; text-align: center; padding: 16px; mar
       <div style="color:#a0bedd;font-size:12px;margin-bottom:12px">Download a list of all staff with outstanding payments as at the current arrears month.</div>
       <button onclick="exportArrears()" style="width:100%;padding:12px;background:#c0392b;border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:700;cursor:pointer">&#11015; Download Arrears List</button>
       <div id="arrearsMsg" style="margin-top:8px;font-size:12px;text-align:center;display:none"></div>
+    </div>
+
+    <!-- Staff Statements PDF -->
+    <div class="section-head">Download Staff Statements (PDF)</div>
+    <div style="background:#162d55;border-radius:12px;padding:16px;margin-bottom:16px">
+      <div style="color:#a0bedd;font-size:12px;margin-bottom:12px">One block per active staff member, grouped by department: each month's payment, arrears and advance payments up to the current arrears month. Deactivated staff are left out.</div>
+      <button onclick="generateStatementsPdf()" style="width:100%;padding:12px;background:#2e75b6;border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:700;cursor:pointer">&#11015; Download Statements PDF</button>
+      <div id="pdfMsg" style="margin-top:8px;font-size:12px;text-align:center;display:none"></div>
     </div>
 
     <!-- Reactivate Staff -->
@@ -2842,6 +2851,118 @@ async function saveStaffEdit() {
   sel.options[sel.selectedIndex].text = name + ' (' + dept + ')';
 
   showAdminMsg(msg, 'Saved successfully!' + dateNote, dateNote ? '#ffc107' : '#5fdb80');
+}
+
+// ── Staff Statements PDF (one block per staff member, grouped by department) ──
+function generateStatementsPdf() {
+  const msg = document.getElementById('pdfMsg');
+  if (!window.jspdf) { showAdminMsg(msg, 'PDF library did not load. Check your connection and refresh.', '#ff8080'); return; }
+  showAdminMsg(msg, 'Generating...', '#a0bedd');
+  try {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const PER = 40, PW = 210, PH = 297, M = 14, COLS = 7, CW = 26, CH = 12;
+    const hex  = h => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)];
+    const fill = h => doc.setFillColor(...hex(h));
+    const ink  = h => doc.setTextColor(...hex(h));
+    const fmtM = m => m.replace(/\s*'(\d{2})/, (_, y) => ' 20' + y);
+    const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+    const money = n => 'GH\u00a2' + Number(n).toLocaleString('en-US');
+
+    // draws coloured text segments [[text, '#hex', bold, gapAfterMm], ...] starting at x (or right-aligned to x)
+    function segs(list, x, y, size, rightAlign) {
+      doc.setFontSize(size);
+      const widths = list.map(([t, , b, g]) => { doc.setFont('helvetica', b ? 'bold' : 'normal'); return doc.getTextWidth(t) + (g || 0); });
+      let cx = rightAlign ? x - widths.reduce((a, b) => a + b, 0) : x;
+      list.forEach(([t, c, b], i) => { doc.setFont('helvetica', b ? 'bold' : 'normal'); ink(c); doc.text(t, cx, y); cx += widths[i]; });
+    }
+
+    // title block
+    let y = M;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(14); ink('#000000');
+    doc.text('CAPE COAST TECHNICAL INSTITUTE STAFF WELFARE ASSOCIATION', PW / 2, y + 6, { align: 'center' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); ink('#444444');
+    doc.text('Staff Welfare/ Glico Insurance Contributions', PW / 2, y + 12, { align: 'center' });
+    doc.text(fmtM(MONTHS[0]) + ' \u2013 ' + fmtM(MONTHS[CURRENT_IDX]) + '  \u00b7  Monthly contribution: ' + money(PER), PW / 2, y + 17, { align: 'center' });
+    y += 26;
+
+    let currentDept = null, count = 0;
+    STAFF.forEach(([no, name, dept, payments]) => {
+      const vals = payments.map(v => v || 0);
+      const start = payments.findIndex(v => v !== null);
+      if (start === -1) return;
+      let lastPaid = -1; vals.forEach((v, i) => { if (v > 0) lastPaid = i; });
+      const end = Math.max(start, CURRENT_IDX, lastPaid);
+
+      const dueVals = vals.slice(start, CURRENT_IDX + 1);
+      const paidMonths     = dueVals.filter(v => v >= PER).length;
+      const arrearsMonths  = dueVals.filter(v => v < PER).length;
+      const partialMonths  = dueVals.filter(v => v > 0 && v < PER).length;
+      const arrearsAmount  = dueVals.reduce((s, v) => s + Math.max(0, PER - v), 0);
+      const advance        = vals.slice(CURRENT_IDX + 1).reduce((a, b) => a + b, 0);
+      const total          = vals.reduce((a, b) => a + b, 0);
+
+      const nCells = end - start + 1, rows = Math.ceil(nCells / COLS);
+      const blockH = 12 + rows * CH + 8;
+      const newDept = dept !== currentDept;
+      if (y + blockH + (newDept ? 10 : 0) > PH - M) { doc.addPage(); y = M; }
+      if (newDept) {
+        currentDept = dept;
+        fill('#16324f'); doc.rect(M, y, COLS * CW, 7, 'F');
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(11); ink('#ffffff');
+        doc.text(String(dept).toUpperCase(), M + 3, y + 5);
+        y += 10;
+      }
+
+      // name + total
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); ink('#000000');
+      doc.text(no + '. ' + name, M, y + 4);
+      segs([['Total Paid:', '#333333', false, 1.6], [money(total), '#333333', true]], PW - M, y + 4, 9, true);
+
+      // status line
+      let partialNote = '';
+      if (partialMonths === 1 && arrearsMonths === 1) partialNote = ' (partial)';
+      else if (partialMonths) partialNote = ' (' + partialMonths + ' partial)';
+      const line = [[plural(paidMonths, 'month') + ' paid', '#1e7a34', false], ['  \u2022  ', '#888888', false]];
+      if (arrearsMonths) line.push([plural(arrearsMonths, 'month') + ' in arrears' + partialNote + ' (' + money(arrearsAmount) + ')', '#a32020', false]);
+      else line.push(['Fully up to date', '#1e7a34', false]);
+      if (advance) { line.push(['  \u2022  ', '#888888', false]); line.push([money(advance) + ' paid in advance', '#1e5fa0', false]); }
+      segs(line, M, y + 9.5, 8, false);
+
+      // month grid
+      const gridTop = y + 12;
+      doc.setDrawColor(204, 204, 204); doc.setLineWidth(0.2);
+      for (let k = 0; k < rows * COLS; k++) {
+        const cx = M + (k % COLS) * CW, cy = gridTop + Math.floor(k / COLS) * CH;
+        if (k >= nCells) { fill('#ffffff'); doc.rect(cx, cy, CW, CH, 'FD'); continue; }
+        const i = start + k, v = vals[i], due = i <= CURRENT_IDX;
+        let bg, fg, label, tick = false, cross = false;
+        if (v >= PER)           { bg = due ? '#e6f4ea' : '#e7f0fb'; fg = due ? '#1e7a34' : '#1e5fa0'; label = '\u00a2' + v + (due ? '' : ' (adv)'); tick = true; }
+        else if (v > 0)         { bg = due ? '#fff6e0' : '#e7f0fb'; fg = due ? '#8a6400' : '#1e5fa0'; label = '\u00a2' + v + (due ? '' : ' (adv)'); }
+        else                    { bg = '#fdeaea'; fg = '#a32020'; label = 'Unpaid'; cross = true; }
+        fill(bg); doc.rect(cx, cy, CW, CH, 'FD');
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); ink('#555555');
+        doc.text(MONTHS[i], cx + CW / 2, cy + 4.2, { align: 'center' });
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5);
+        const tw = doc.getTextWidth(label) + ((tick || cross) ? 4 : 0);
+        let sx = cx + CW / 2 - tw / 2;
+        doc.setDrawColor(...hex(fg)); doc.setLineWidth(0.4);
+        if (tick)  { doc.line(sx, cy + 8.3, sx + 1, cy + 9.4); doc.line(sx + 1, cy + 9.4, sx + 2.8, cy + 7.1); sx += 4; }
+        if (cross) { doc.line(sx, cy + 7.3, sx + 2.4, cy + 9.7); doc.line(sx + 2.4, cy + 7.3, sx, cy + 9.7); sx += 4; }
+        ink(fg); doc.text(label, sx, cy + 9.4);
+        doc.setDrawColor(204, 204, 204); doc.setLineWidth(0.2);
+      }
+      y += blockH;
+      count++;
+    });
+
+    const today = new Date().toISOString().slice(0, 10);
+    doc.save('CCTI_Welfare_Statements_' + today + '.pdf');
+    showAdminMsg(msg, count + ' staff statements generated.', '#5fdb80');
+  } catch (err) {
+    console.error(err);
+    showAdminMsg(msg, 'Could not generate PDF: ' + err.message, '#ff8080');
+  }
 }
 
 // Start
