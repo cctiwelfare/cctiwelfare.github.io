@@ -2536,8 +2536,13 @@ async function loadAuditLog() {
 }
 
 // ── SMS Notifications ────────────────────────────────────────
-const MOOLRE_API_KEY  = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ2YXNpZCI6MTA5MDQsImV4cCI6MTk1NjUyNzk5OX0.e728FypY88eoCEjmgt5HagQw7mv-5JIh9YqUiD5pj74';
-const MOOLRE_SENDER   = 'CCTIWelfare';
+// SMS is sent by the 'send-sms' Supabase Edge Function (it holds the Moolre key and sender ID).
+// Only a logged-in admin can call it. Returns Moolre's JSON response.
+async function sendSmsViaServer(messages) {
+  const { data, error } = await db.functions.invoke('send-sms', { body: { messages } });
+  if (error) throw error;
+  return data;
+}
 
 async function sendPaymentSMS(staffIdx, amountReceived, dateRcvd) {
   // Fetch phone number for this staff
@@ -2601,18 +2606,7 @@ async function sendPaymentSMS(staffIdx, amountReceived, dateRcvd) {
   if (!phoneNum.startsWith('233')) phoneNum = '233' + phoneNum;
 
   try {
-    await fetch('https://api.moolre.com/open/sms/send', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-VASKEY': MOOLRE_API_KEY
-      },
-      body: JSON.stringify({
-        type: 1,
-        senderid: MOOLRE_SENDER,
-        messages: [{ recipient: phoneNum, message }]
-      })
-    });
+    await sendSmsViaServer([{ recipient: phoneNum, message }]);
   } catch(e) {
     console.error('SMS failed:', e);
   }
@@ -2702,14 +2696,8 @@ async function sendArrearsSMS() {
     if (!phoneNum.startsWith('233')) phoneNum = '233' + phoneNum;
 
     try {
-      const resp = await fetch('https://api.moolre.com/open/sms/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-API-VASKEY': MOOLRE_API_KEY },
-        body: JSON.stringify({ type: 1, senderid: MOOLRE_SENDER,
-          messages: [{ recipient: phoneNum, message }] })
-      });
-      const data = await resp.json();
-      if (data.status === 1) sent++; else failed++;
+      const data = await sendSmsViaServer([{ recipient: phoneNum, message }]);
+      if (data && data.status === 1) sent++; else failed++;
     } catch(e) { failed++; }
 
     // Small delay to avoid rate limiting
