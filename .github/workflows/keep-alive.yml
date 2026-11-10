@@ -1,0 +1,21 @@
+# Keeps the free Supabase project from auto-pausing after 7 days without activity.
+# Runs twice a week and can also be run by hand (Actions tab > Keep Supabase awake > Run workflow).
+# The URL and anon key below are the same public values already in index.html.
+# If the project is paused or unreachable, the request fails and GitHub emails you about the failed run.
+name: Keep Supabase awake
+
+on:
+  schedule:
+    - cron: '0 6 * * 1,4'   # Mondays and Thursdays, 06:00 UTC (same as Ghana time)
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query the database
+        run: |
+          curl --fail --silent --show-error --max-time 30 \
+            "https://vwcpmdfqncfqveulmmae.supabase.co/rest/v1/periods?select=id&limit=1" \
+            -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ3Y3BtZGZxbmNmcXZldWxtbWFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQxODkwMDEsImV4cCI6MjA5OTc2NTAwMX0.gfObhQf97xE9eFnFHPtB0k2_6jMA_xgMMWe02lq-Uos" \
+            -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ3Y3BtZGZxbmNmcXZldWxtbWFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQxODkwMDEsImV4cCI6MjA5OTc2NTAwMX0.gfObhQf97xE9eFnFHPtB0k2_6jMA_xgMMWe02lq-Uos"
