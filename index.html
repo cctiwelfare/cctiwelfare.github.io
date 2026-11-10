@@ -629,6 +629,34 @@ footer { color: #1e3d6b; font-size: 11px; text-align: center; padding: 16px; mar
       <button onclick="downloadDeactivatedList()" style="width:100%;margin-top:14px;padding:12px;background:#2e75b6;border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:700;cursor:pointer">&#11015; Download Deactivated List</button>
     </div>
 
+    <!-- Held Payments (deactivated staff) -->
+    <div class="section-head">Held Payments <span id="heldCount" style="color:#ffc107;font-weight:400;text-transform:none;letter-spacing:0"></span></div>
+    <div style="background:#162d55;border-radius:12px;padding:16px;margin-bottom:16px">
+      <div style="color:#a0bedd;font-size:12px;margin-bottom:12px">Record cash received from a deactivated member while Glico reactivation is pending. It stays out of the totals until you reactivate them, then it is applied to their months automatically.</div>
+      <div id="heldSqlNote" style="display:none;background:#3a2f00;color:#ffc107;border-radius:8px;padding:10px;font-size:12px;margin-bottom:12px"></div>
+      <div style="margin-bottom:10px">
+        <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">Deactivated Staff Member</label>
+        <select id="heldStaff" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:14px;outline:none"></select>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <div style="flex:1">
+          <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">Amount (GH&#x20B5;)</label>
+          <input type="number" id="heldAmount" min="1" placeholder="e.g. 200" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:13px;outline:none;box-sizing:border-box">
+        </div>
+        <div style="flex:1">
+          <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">Date Received</label>
+          <input type="date" id="heldDate" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:13px;outline:none;box-sizing:border-box">
+        </div>
+      </div>
+      <div style="margin-bottom:14px">
+        <label style="display:block;color:#7eb3e8;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px">Note (optional)</label>
+        <input type="text" id="heldNote" placeholder="e.g. paid cash, awaiting Glico" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #2e5fa3;background:#0f2044;color:#fff;font-size:13px;outline:none;box-sizing:border-box">
+      </div>
+      <button onclick="addHeldPayment()" style="width:100%;padding:12px;background:#28a745;border:none;border-radius:8px;color:#fff;font-size:14px;font-weight:700;cursor:pointer">Record Held Payment</button>
+      <div id="heldMsg" style="margin-top:8px;font-size:12px;text-align:center;display:none"></div>
+      <div id="heldList" style="margin-top:14px"></div>
+    </div>
+
     <!-- Reactivate Staff -->
     <div class="section-head">Reactivate Staff</div>
     <div style="background:#162d55;border-radius:12px;padding:16px;margin-bottom:16px">
@@ -753,6 +781,7 @@ async function computeTotalCollected() {
 
 // ── App state ─────────────────────────────────────────────────
 let MONTHS = [], STAFF = [], GLICO_PAID = [], MONTHLY_TOTALS = [];
+let PENDING = []; // held payments from deactivated staff (admin only; not in totals until reactivation)
 let INACTIVE_STAFF = []; // deactivated staff: searchable on My Record, read-only, kept out of STAFF so stats/arrears/SMS are unaffected
 let TOTAL_COLLECTED = 0, CURRENT_IDX = 0, DUE_MONTHS = 0;
 let RECON_DRIFT = 0; // difference between raw payments-table sum and reconciled total; 0 = healthy
@@ -784,12 +813,14 @@ async function doLogin() {
   }
   closeLogin();
   setAdminMode(true, email);
+  loadPendingPayments();
   // Refresh current card if open
   refreshOpenCard();
 }
 async function doLogout() {
   await db.auth.signOut();
   setAdminMode(false, '');
+  PENDING = [];
   refreshOpenCard();
 }
 function refreshOpenCard() {
@@ -961,6 +992,7 @@ async function loadData() {
 
     document.getElementById('loadingScreen').style.display = 'none';
     document.getElementById('adminLoginBtn').style.display = IS_ADMIN ? 'none' : 'block';
+    if (IS_ADMIN) loadPendingPayments();
 
   } catch(err) {
     console.error(err);
@@ -1439,6 +1471,7 @@ function showCard([num, name, dept, payments, dbId, deactivatedAt], staffIdx, in
         <span class="total-amount" id="cardTotal">¢${total.toLocaleString()}</span>
       </div>
 ${inactive ? '<div class="status-bar" style="background:#f3f3f3;color:#777;border-top-color:#ddd">' + (deactivatedAt ? 'Deactivated on ' + fmtDate(deactivatedAt) : 'Deactivated from Glico welfare') + '</div>' : buildStatusBar(payments, joinIdx)}
+${(inactive && IS_ADMIN && heldTotalFor(dbId)) ? '<div style="padding:8px 20px;font-size:12px;text-align:center;background:#fff8e1;color:#8a6400;border-top:1px solid #f0d060">Held GH&#x20B5;' + heldTotalFor(dbId).toLocaleString() + ' (not in total)</div>' : ''}
       <div id="lastPaymentInfo" style="font-size:11px;color:#6a8ab5;text-align:center;padding:4px 0"></div>
       <div class="save-bar" id="saveBar">
         <div id="monthHint" style="font-size:11px;color:#276c3a;margin-bottom:8px;font-weight:600"></div>
@@ -2010,6 +2043,9 @@ async function setupAdminPanel() {
   }
   setNextMonthDefaults();
   renderDeactivatedList();
+  const heldDateEl = document.getElementById('heldDate');
+  if (heldDateEl && !heldDateEl.value) heldDateEl.value = today;
+  loadPendingPayments();
 
   const countEl = document.getElementById('currentMonthCount');
   if (countEl) countEl.textContent = MONTHS.length + ' months (' + MONTHS[0] + ' to ' + MONTHS[MONTHS.length-1] + ')';
@@ -2758,7 +2794,12 @@ async function reactivateStaffMember() {
   const msg  = document.getElementById('reactivateMsg');
 
   if (!id) { showAdminMsg(msg, 'No inactive staff to reactivate.', '#ff8080'); return; }
-  const reactOk = await showPayConfirm('<div style="color:#c8dcf5">Reactivate <strong>' + name + '</strong>?<br><span style="font-size:12px;color:#a0bedd">They will reappear in the staff list.</span></div>');
+  const held      = PENDING.filter(p => Number(p.staff_id) === Number(id));
+  const heldTotal = held.reduce((sum, p) => sum + (p.amount || 0), 0);
+  const heldNote  = heldTotal
+    ? '<div style="margin-top:10px;color:#ffc107;font-size:12px">GH&#x20B5;' + heldTotal.toLocaleString() + ' held from ' + held.length + ' payment' + (held.length > 1 ? 's' : '') + ' will be applied to their months now, starting from their first unpaid month.</div>'
+    : '';
+  const reactOk = await showPayConfirm('<div style="color:#c8dcf5">Reactivate <strong>' + name + '</strong>?<br><span style="font-size:12px;color:#a0bedd">They will reappear in the staff list.</span></div>' + heldNote);
   if (!reactOk) return;
 
   showAdminMsg(msg, 'Updating...', '#a0bedd');
@@ -2768,7 +2809,21 @@ async function reactivateStaffMember() {
   }
   if (error) { showAdminMsg(msg, 'Error: ' + error.message, '#ff8080'); return; }
 
-  showAdminMsg(msg, name + ' reactivated. Refresh to update the list.', '#5fdb80');
+  let applyNote = '';
+  if (heldTotal) {
+    try {
+      const res = await applyHeldPayments(id);
+      applyNote = ' GH\u20B5' + res.applied.toLocaleString() + ' of held payments applied'
+        + (res.leftover ? ' (GH\u20B5' + res.leftover.toLocaleString() + ' could not be applied: all months are full)' : '') + '.';
+    } catch (e) {
+      console.error(e);
+      showAdminMsg(msg, name + ' reactivated, but applying the held payments failed: ' + e.message + '. Check the Payment Ledger before trying again.', '#ff8080');
+      await loadPendingPayments();
+      return;
+    }
+    await loadPendingPayments();
+  }
+  showAdminMsg(msg, name + ' reactivated.' + applyNote + ' Refresh to update the list.', '#5fdb80');
   sel.remove(sel.selectedIndex);
   if (sel.options.length === 0) sel.innerHTML = '<option>No inactive staff</option>';
 }
@@ -2881,12 +2936,181 @@ function renderDeactivatedList() {
   el.innerHTML = list.map(r => {
     const total = r[3].reduce((sum, v) => sum + (v || 0), 0);
     const when  = r[5] ? 'Deactivated ' + fmtDate(r[5]) : 'Date not recorded';
+    const held  = heldTotalFor(r[4]);
     return '<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #1e3d6b">'
       + '<div><div style="color:#fff;font-weight:600;font-size:13px">' + esc(r[1]) + '</div>'
       + '<div style="color:#7eb3e8;font-size:11px;margin-top:2px">' + esc(r[2]) + ' \u00b7 ' + when + '</div></div>'
-      + '<div style="text-align:right;color:#a0bedd;font-size:11px">Total paid<br><span style="color:#5fdb80;font-weight:700;font-size:13px">GH&#x20B5;' + total.toLocaleString() + '</span></div>'
+      + '<div style="text-align:right;color:#a0bedd;font-size:11px">Total paid<br><span style="color:#5fdb80;font-weight:700;font-size:13px">GH&#x20B5;' + total.toLocaleString() + '</span>' + (held ? '<br><span style="color:#ffc107">Held GH&#x20B5;' + held.toLocaleString() + '</span>' : '') + '</div>'
       + '</div>';
   }).join('');
+}
+
+// ── Held payments from deactivated staff (kept out of totals until reactivation) ──
+function escHtml(t) { return String(t == null ? '' : t).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+function heldTotalFor(staffId) {
+  return PENDING.filter(p => Number(p.staff_id) === Number(staffId)).reduce((sum, p) => sum + (p.amount || 0), 0);
+}
+async function loadPendingPayments() {
+  const note = document.getElementById('heldSqlNote');
+  const { data, error } = await db.from('pending_payments').select('*')
+    .eq('period_id', PERIOD_ID).eq('applied', false)
+    .order('received_date').order('created_at');
+  if (error) {
+    PENDING = [];
+    if (note) { note.style.display = 'block'; note.textContent = 'Held payments are unavailable: ' + error.message + '. If you have not created the pending_payments table in Supabase yet, run its SQL first.'; }
+  } else {
+    PENDING = data || [];
+    if (note) note.style.display = 'none';
+  }
+  renderHeldPayments();
+  renderDeactivatedList();
+  // if a deactivated person's card is open, refresh it so the admin-only held line is current
+  const openName = (document.getElementById('searchInput') || {}).value;
+  const oj = INACTIVE_STAFF.findIndex(x => x[1] === openName);
+  if (oj > -1) showCard(INACTIVE_STAFF[oj], oj, true);
+}
+function renderHeldPayments() {
+  const sel = document.getElementById('heldStaff');
+  if (sel) {
+    const keep = sel.value;
+    sel.innerHTML = INACTIVE_STAFF.length
+      ? INACTIVE_STAFF.map(r => '<option value="' + r[4] + '">' + escHtml(r[1]) + ' (' + escHtml(r[2]) + ')</option>').join('')
+      : '<option value="">No deactivated staff</option>';
+    if (keep) sel.value = keep;
+  }
+  const total = PENDING.reduce((sum, p) => sum + (p.amount || 0), 0);
+  const countEl = document.getElementById('heldCount');
+  if (countEl) countEl.textContent = PENDING.length ? '(GH\u20B5' + total.toLocaleString() + ' held)' : '';
+  const el = document.getElementById('heldList');
+  if (!el) return;
+  if (!PENDING.length) { el.innerHTML = ''; return; }
+  const nameOf = id => {
+    const r = INACTIVE_STAFF.find(x => Number(x[4]) === Number(id));
+    if (r) return r[1];
+    const a = (window._allStaffRows || []).find(x => Number(x.id) === Number(id));
+    return a ? a.name : 'Unknown';
+  };
+  el.innerHTML = '<div style="color:#7eb3e8;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Held (not in totals yet)</div>'
+    + PENDING.map(p =>
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid #1e3d6b">'
+      + '<div><div style="color:#fff;font-weight:600;font-size:13px">' + escHtml(nameOf(p.staff_id)) + '</div>'
+      + '<div style="color:#7eb3e8;font-size:11px;margin-top:2px">Received ' + fmtDate(p.received_date) + (p.note ? ' \u00b7 ' + escHtml(p.note) : '') + '</div></div>'
+      + '<div style="text-align:right"><div style="color:#ffc107;font-weight:700;font-size:13px">GH&#x20B5;' + (p.amount || 0).toLocaleString() + '</div>'
+      + '<button data-id="' + p.id + '" onclick="removeHeldPayment(this.dataset.id)" style="margin-top:4px;padding:3px 10px;background:none;border:1px solid #c0392b;border-radius:6px;color:#ff8080;font-size:11px;cursor:pointer">Remove</button></div>'
+      + '</div>').join('');
+}
+async function addHeldPayment() {
+  const msg    = document.getElementById('heldMsg');
+  const staffId = parseInt(document.getElementById('heldStaff').value);
+  const amount = parseInt(document.getElementById('heldAmount').value);
+  const date   = document.getElementById('heldDate').value;
+  const note   = document.getElementById('heldNote').value.trim() || null;
+  if (!staffId)             { showAdminMsg(msg, 'Select a deactivated staff member.', '#ff8080'); return; }
+  if (!amount || amount <= 0) { showAdminMsg(msg, 'Enter a valid amount.', '#ff8080'); return; }
+  if (!date)                { showAdminMsg(msg, 'Select the date received.', '#ff8080'); return; }
+  showAdminMsg(msg, 'Saving...', '#a0bedd');
+  const { data: { user } } = await db.auth.getUser();
+  const { error } = await db.from('pending_payments').insert({
+    staff_id: staffId, period_id: PERIOD_ID, amount, received_date: date, note, entered_by: user ? user.email : null
+  });
+  if (error) { showAdminMsg(msg, 'Error: ' + error.message, '#ff8080'); return; }
+  document.getElementById('heldAmount').value = '';
+  document.getElementById('heldNote').value = '';
+  await loadPendingPayments();
+  showAdminMsg(msg, 'Held payment recorded. It is not in the totals until they are reactivated.', '#5fdb80');
+}
+async function removeHeldPayment(id) {
+  const p = PENDING.find(x => String(x.id) === String(id));
+  if (!p) return;
+  const pwOk = await requirePassword('Re-enter your password to remove this held payment.');
+  if (!pwOk) return;
+  const ok = await showPayConfirm('<div style="color:#ff8080;font-weight:700;margin-bottom:10px">Remove held payment</div>'
+    + '<div style="color:#c8dcf5">Remove the held payment of GH&#x20B5;' + (p.amount || 0).toLocaleString() + ' received ' + fmtDate(p.received_date) + '?</div>'
+    + '<div style="color:#ffc107;font-size:12px;margin-top:8px">This cannot be undone.</div>');
+  if (!ok) return;
+  const { error } = await db.from('pending_payments').delete().eq('id', p.id).eq('applied', false);
+  if (error) { showToast('Could not remove: ' + error.message, '#ff8080'); return; }
+  showToast('Held payment removed.', '#5fdb80');
+  await loadPendingPayments();
+}
+
+// Applies a person's held payments to their months (oldest unpaid month first), writing the same
+// payments + payment_history rows as a normal entry. received_date is today (the reactivation
+// date) so daily reports and totals pick it up on that day; the original date goes in the note.
+async function applyHeldPayments(staffId) {
+  const held = PENDING
+    .filter(p => Number(p.staff_id) === Number(staffId))
+    .sort((a, b) => String(a.received_date).localeCompare(String(b.received_date)) || String(a.created_at).localeCompare(String(b.created_at)));
+  if (!held.length) return { applied: 0, leftover: 0 };
+
+  const { data: { user } } = await db.auth.getUser();
+  const email  = user ? user.email : null;
+  const row    = (window._allStaffRows || []).find(r => Number(r.id) === Number(staffId));
+  const jm     = (row && row.joined_month) || 0;
+  const { data: rows, error: rowsErr } = await db.from('payments')
+    .select('month_idx, amount, amount_received, note')
+    .eq('staff_id', staffId).eq('period_id', PERIOD_ID);
+  if (rowsErr) throw rowsErr;
+
+  const byMonth = {};
+  (rows || []).forEach(r => { byMonth[r.month_idx] = r; });
+  const usable  = Object.keys(byMonth).map(Number).filter(i => i >= jm);
+  const joinIdx = usable.length ? Math.min(...usable) : jm;   // same join-month rule as the staff card
+
+  const today    = new Date().toISOString().slice(0, 10);
+  const todayLbl = today.split('-').reverse().join('/');
+  let applied = 0, leftover = 0;
+
+  for (const p of held) {
+    let remaining = p.amount;
+    const txnId   = crypto.randomUUID();
+    const rcvdLbl = String(p.received_date).slice(0, 10).split('-').reverse().join('/');
+    const noteTxt = 'held payment, cash received on ' + rcvdLbl + ', applied on reactivation' + (p.note ? ': ' + p.note : '');
+
+    for (let m = joinIdx; m < MONTHS.length && remaining > 0; m++) {
+      const cur    = byMonth[m] ? (byMonth[m].amount || 0) : 0;
+      const canAdd = 40 - cur;
+      if (canAdd <= 0) continue;
+      const toAdd  = Math.min(remaining, canAdd);
+      const newAmt = cur + toAdd;
+      const prevRecv = byMonth[m] ? (byMonth[m].amount_received || 0) : 0;
+      const oldNote  = byMonth[m] && byMonth[m].note ? byMonth[m].note : '';
+      const newNote  = (oldNote ? oldNote + '\n' : '') + todayLbl + ': ' + noteTxt;
+
+      const { error: upErr } = await db.from('payments').upsert({
+        staff_id: staffId, period_id: PERIOD_ID, month_idx: m,
+        amount: newAmt, amount_received: prevRecv + toAdd, note: newNote,
+        received_date: today, entered_by: email, updated_at: new Date().toISOString()
+      }, { onConflict: 'staff_id,period_id,month_idx' });
+      if (upErr) throw upErr;
+
+      const { error: hErr } = await db.from('payment_history').insert({
+        staff_id: staffId, period_id: PERIOD_ID, month_idx: m,
+        action: toAdd < newAmt ? 'topup' : 'new',
+        amount_change: toAdd, total_after: newAmt, previous_amount: cur,
+        received_date: today, note: noteTxt, entered_by: email, transaction_id: txnId
+      });
+      if (hErr) throw hErr;
+
+      byMonth[m] = { amount: newAmt, amount_received: prevRecv + toAdd, note: newNote };
+      remaining -= toAdd;
+      applied   += toAdd;
+    }
+
+    if (remaining === 0) {
+      const { error } = await db.from('pending_payments')
+        .update({ applied: true, applied_at: new Date().toISOString(), transaction_id: txnId }).eq('id', p.id);
+      if (error) throw error;
+    } else {
+      leftover += remaining;
+      if (remaining < p.amount) {
+        const { error } = await db.from('pending_payments')
+          .update({ amount: remaining, note: (p.note ? p.note + ' ' : '') + '[part applied]' }).eq('id', p.id);
+        if (error) throw error;
+      }
+    }
+  }
+  return { applied, leftover };
 }
 
 function downloadDeactivatedList() {
@@ -2908,7 +3132,9 @@ function downloadDeactivatedList() {
     byDept[dept].sort((a, b) => String(a[1]).localeCompare(String(b[1]))).forEach(r => {
       const total = r[3].reduce((sum, v) => sum + (v || 0), 0);
       const when  = r[5] ? 'Deactivated ' + fmtDate(r[5]) : 'Deactivation date not recorded';
-      lines.push(serial + '. ' + r[1] + ' \u2014 ' + when + ' \u2014 Total paid GH\u20B5' + total.toLocaleString());
+      const held  = heldTotalFor(r[4]);
+      lines.push(serial + '. ' + r[1] + ' \u2014 ' + when + ' \u2014 Total paid GH\u20B5' + total.toLocaleString()
+        + (held ? ' \u2014 Held GH\u20B5' + held.toLocaleString() + ' (not in totals)' : ''));
       serial++;
     });
     lines.push('');
